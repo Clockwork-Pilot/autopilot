@@ -1,0 +1,132 @@
+name: Issue Trigger
+
+# Pure-library reusable workflow: callable only via `uses:` from a consumer
+# caller workflow that wires it to the `issues` event (see autopilot-selftest
+# for the canonical caller). The consumer passes the relevant github.event.*
+# fields through as inputs — this file never reads github.event directly,
+# since a reusable workflow invoked via workflow_call does not have an
+# event-specific context.
+#
+# The target_workflow input names the consumer's workflow_dispatch caller
+# (typically `agent.yml`) that wraps coding-agent.yml. issue-trigger fires
+# that dispatch via `gh workflow run`, scoped to the consumer's repo.
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: github.event.action (e.g., "opened" or "labeled")
+        required: true
+        type: string
+      label_name:
+        description: github.event.label.name (only meaningful when action == "labeled")
+        required: false
+        type: string
+        default: ""
+      issue_number:
+        description: github.event.issue.number
+        required: true
+        type: number
+      sender_login:
+        description: github.event.sender.login — the GitHub username that applied the label; used as the runner label
+        required: true
+        type: string
+      default_branch:
+        description: github.event.repository.default_branch — ref used when dispatching target_workflow
+        required: true
+        type: string
+      target_workflow:
+        description: Filename of the consumer workflow_dispatch caller that wraps coding-agent.yml (must accept runner_label and issue_number inputs)
+        required: false
+        type: string
+        default: agent.yml
+    secrets:
+      RUNNERS_PAT:
+        description: Fine-grained PAT with Administration:Read-only on the consumer repo, used to verify an online self-hosted runner exists before dispatching. See README section "Runner PAT setup".
+        required: true
+
+jobs:
+  ensure-label:
+    if: inputs.action == 'opened'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure agent-run label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/labels/agent-run" >/dev/null 2>&1 || \
+            gh api -X POST "repos/${{ github.repository }}/labels" \
+              -f name=agent-run \
+              -f color=0E8A16 \
+              -f description="Apply to trigger the coding agent on this issue"
+
+  trigger:
+    if: inputs.action == 'labeled' && inputs.label_name == 'agent-run'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      issues: write
+
+    steps:
+      - name: Remove trigger label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          gh api -X DELETE \
+            "repos/${{ github.repository }}/issues/$ISSUE_NUMBER/labels/agent-run" \
+            || true
+
+      - name: Ensure RUNNERS_PAT is configured
+        env:
+          RUNNERS_PAT: ${{ secrets.RUNNERS_PAT }}
+        run: |
+          : "${RUNNERS_PAT:?RUNNERS_PAT secret is not configured. It is a fine-grained PAT with Administration:Read-only on this repo, used to check that an online self-hosted runner exists before dispatching the target workflow. See README section 'Runner PAT setup' for why this permission is required and the one-time setup steps.}"
+
+      - name: Check runner exists for actor
+        id: runner_check
+        env:
+          GH_TOKEN: ${{ secrets.RUNNERS_PAT }}
+          USERNAME: ${{ inputs.sender_login }}
+        run: |
+          RUNNERS=$(gh api repos/${{ github.repository }}/actions/runners)
+          MATCH=$(echo "$RUNNERS" | jq --arg label "$USERNAME" '
+            .runners[] | select(.labels[].name == $label) | select(.status == "online")
+          ')
+          if [ -n "$MATCH" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger coding agent workflow
+        if: steps.runner_check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_WORKFLOW: ${{ inputs.target_workflow }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          RUNNER_LABEL: ${{ inputs.sender_login }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        # Dispatch against the consumer repo's default branch so the workflow
+        # definition is always read from the latest merged version. The
+        # dispatched coding-agent job re-parses issue YAML itself to pick the
+        # agent's actual base_branch, so we don't need to parse it here.
+        run: |
+          gh workflow run "$TARGET_WORKFLOW" \
+            --repo ${{ github.repository }} \
+            -r "$DEFAULT_BRANCH" \
+            --field runner_label="$RUNNER_LABEL" \
+            --field issue_number="$ISSUE_NUMBER"
+
+      - name: Comment if no runner found
+        if: steps.runner_check.outputs.found == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          USERNAME: ${{ inputs.sender_login }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo ${{ github.repository }} \
+            --body "No online runner found for user **$USERNAME**."

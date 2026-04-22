@@ -1,0 +1,5 @@
+{
+  "needs.fetch-issue.outputs.title": "Wire branches",
+  "needs.fetch-issue.outputs.body_raw": "---\npr_branch: feature/custom\nbase_branch: develop\nmerge_into_upstream: true\n---\nDo it.",
+  "inputs.issue_number": "12"
+}

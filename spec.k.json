@@ -1,0 +1,173 @@
+{
+  "type": "Spec",
+  "model_version": 1,
+  "version": 1,
+  "description": "Workflow structure constraints for .github/workflows",
+  "contains_unverified_constraints": false,
+  "features": {
+    "workflow_hygiene": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "workflow_hygiene",
+      "description": "Workflows use SHA-pinned actions",
+      "goals": [
+        "All action references must be pinned to full commit SHAs for reproducibility and security"
+      ],
+      "constraints": {
+        "checkout_pinned_to_approved_sha": {
+          "id": "checkout_pinned_to_approved_sha",
+          "cmd": "for f in $PROJECT_ROOT/.github/workflows/*.yml; do yq '[.jobs[].steps[]? | .uses? | select(. != null) | select(test(\"actions/checkout@\")) | select(. != \"actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\")] | length' \"$f\" | grep -q '^0$' || { echo \"Non-approved checkout SHA in $f\"; exit 1; }; done",
+          "description": "Security: actions/checkout@v6 must be pinned to exactly de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+          "fails_count": 1
+        },
+        "no_checkout_v4_in_workflows": {
+          "id": "no_checkout_v4_in_workflows",
+          "cmd": "! grep -rn \"actions/checkout@v4\" \"$PROJECT_ROOT/.github/workflows/\" --include=\"*.yml\"",
+          "description": "Negative: no .github/workflows/*.yml file may reference actions/checkout@v4",
+          "fails_count": 1
+        }
+      }
+    },
+    "coding_agent_steps": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "coding_agent_steps",
+      "description": "Coding agent steps for workflow automation",
+      "goals": [
+        "Entry point called identically by workflow and constraint"
+      ],
+      "depends_on": [
+        "workflow_hygiene"
+      ],
+      "constraints": {
+        "dispatcher_fails_on_missing_step": {
+          "id": "dispatcher_fails_on_missing_step",
+          "cmd": "cd $PROJECT_ROOT && ERR=$(.github/scripts/act-step-dispatch.sh coding-agent.yml nonexistent_step_xyz 2>&1 1>/dev/null); RC=$?; [ $RC -ne 0 ] && echo \"$ERR\" | grep -q \"Step 'nonexistent_step_xyz' not found\"",
+          "description": "Negative: act-step-dispatch.sh must exit non-zero AND emit the missing-step error to stderr (not stdout) when the requested step does not exist",
+          "fails_count": 1
+        },
+        "fetch_issue_job_shape": {
+          "id": "fetch_issue_job_shape",
+          "cmd": "yq -e '.jobs[\"fetch-issue\"].outputs.title' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && yq -e '.jobs[\"fetch-issue\"].outputs.body_raw' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && yq -r '.jobs[\"fetch-issue\"].steps[] | select(.run != null) | .run' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -q 'gh api'",
+          "description": "Structural: fetch-issue job must exist with title and body_raw job-level outputs, and its run block must call gh api (it is the network-bound fetcher that feeds parse-issue).",
+          "fails_count": 1
+        },
+        "parse_issue_consumes_fetch_issue": {
+          "id": "parse_issue_consumes_fetch_issue",
+          "cmd": "yq -e '.jobs[\"parse-issue\"].needs | if type == \"array\" then any(.[]; . == \"fetch-issue\") else . == \"fetch-issue\" end' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && yq -e '.jobs[\"parse-issue\"].env.TITLE' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -q 'needs.fetch-issue.outputs.title' && yq -e '.jobs[\"parse-issue\"].env.BODY_RAW' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -q 'needs.fetch-issue.outputs.body_raw' && yq -e '.jobs[\"parse-issue\"].env.ISSUE_NUMBER' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -q 'inputs.issue_number'",
+          "description": "Structural: parse-issue must declare needs: fetch-issue AND wire job-level env TITLE/BODY_RAW from needs.fetch-issue.outputs.* and ISSUE_NUMBER from inputs.issue_number. Env keys use natural names (no INPUT_ prefix) since the dispatcher resolves env expressions directly.",
+          "fails_count": 1
+        },
+        "run_agent_consumes_parse_issue": {
+          "id": "run_agent_consumes_parse_issue",
+          "cmd": "yq -e '.jobs[\"run-agent\"].needs | if type == \"array\" then any(.[]; . == \"parse-issue\") else . == \"parse-issue\" end' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && ! yq -r '.jobs | keys | .[]' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -qx slug && ! test -f $PROJECT_ROOT/.github/scripts/get-issue-details.sh && ! grep -q 'steps.issue.outputs' $PROJECT_ROOT/.github/workflows/coding-agent.yml",
+          "description": "Structural: run-agent must depend on parse-issue; the legacy slug job must be gone; get-issue-details.sh must be deleted; no references to steps.issue.outputs.* may remain. Enforces the cutover to parse-issue as single source of parsed issue data.",
+          "fails_count": 1
+        },
+        "run_agent_consumes_image_digest": {
+          "id": "run_agent_consumes_image_digest",
+          "cmd": "yq -e '.jobs[\"run-agent\"].needs | if type == \"array\" then any(.[]; . == \"image-digest\") else . == \"image-digest\" end' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && yq -e '.jobs[\"image-digest\"].uses == \"./.github/workflows/image-digest.yml\"' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && test -f $PROJECT_ROOT/.github/workflows/image-digest.yml && ! test -d $PROJECT_ROOT/.github/actions/image-digest && ! grep -q 'steps.image-digest.outputs' $PROJECT_ROOT/.github/workflows/coding-agent.yml && ! test -f $PROJECT_ROOT/.github/scripts/get-image-digest.sh && ! test -f $PROJECT_ROOT/.github/scripts/docker-cache.sh",
+          "description": "Structural: run-agent must depend on image-digest; image-digest must be a job that calls the reusable workflow ./.github/workflows/image-digest.yml; legacy composite action .github/actions/image-digest must be gone; no references to steps.image-digest.outputs.* may remain (migrated to needs.image-digest.outputs.*); get-image-digest.sh and docker-cache.sh must be deleted.",
+          "fails_count": 1
+        }
+      }
+    },
+    "docker_environment": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "docker_environment",
+      "description": "Constraint checks must run inside Docker container",
+      "goals": [
+        "Ensure constraint checker only runs in Docker environment, not on bare host"
+      ],
+      "depends_on": [
+        "workflow_hygiene"
+      ],
+      "constraints": {
+        "docker_required": {
+          "id": "docker_required",
+          "cmd": "test -f /.dockerenv || { echo 'Error: Constraints must run inside Docker container'; exit 1; }",
+          "description": "Verify constraints are running inside an existing Docker container (/.dockerenv present). We are already in Docker \u2014 do not nest another container layer.",
+          "fails_count": 1
+        }
+      }
+    },
+    "step_output_checks": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "step_output_checks",
+      "description": "Behavioral checks: dispatch a workflow step with a fixture input and assert its $GITHUB_OUTPUT matches fixture.",
+      "goals": [
+        "One behavioral constraint per dispatchable step, using mktemp -d for isolation"
+      ],
+      "depends_on": [
+        "coding_agent_steps"
+      ],
+      "constraints": {
+        "parse_issue_cases": {
+          "id": "parse_issue_cases",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh coding-agent.yml parse-issue",
+          "description": "Behavioral: runs every fixture under fixtures/parse-issue/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+          "fails_count": 1
+        },
+        "choose_branch_cases": {
+          "id": "choose_branch_cases",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh coding-agent.yml choose-branch",
+          "description": "Behavioral: runs every fixture under fixtures/choose-branch/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+          "fails_count": 1
+        },
+        "parse_digest_cases": {
+          "id": "parse_digest_cases",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh image-digest.yml parse-digest",
+          "description": "Behavioral: runs every fixture under fixtures/parse-digest/<case>/ and diffs the parse-digest job's emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+          "fails_count": 1
+        }
+      }
+    },
+    "upstream_pr_isolation": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "upstream_pr_isolation",
+      "description": "Cross-repo PR creation is isolated from the self-hosted agent runner",
+      "goals": [
+        "UPSTREAM_PR_TOKEN (PAT) is never available on the self-hosted runner where the agent executes code",
+        "The upstream-pr environment and its secret are scoped to a single, minimal job"
+      ],
+      "depends_on": [
+        "coding_agent_steps"
+      ],
+      "constraints": {
+        "open_upstream_pr_job_shape": {
+          "id": "open_upstream_pr_job_shape",
+          "cmd": "yq -e '.jobs[\"open-upstream-pr\"].environment == \"upstream-pr\"' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && yq -e '.jobs[\"open-upstream-pr\"].\"runs-on\" == \"ubuntu-latest\"' $PROJECT_ROOT/.github/workflows/coding-agent.yml >/dev/null && IF=$(yq -r '.jobs[\"open-upstream-pr\"].if' $PROJECT_ROOT/.github/workflows/coding-agent.yml) && echo \"$IF\" | grep -q \"has_new_commit == 'true'\" && echo \"$IF\" | grep -q \"merge_into_upstream == 'true'\"",
+          "description": "Structural: open-upstream-pr must declare environment: upstream-pr, run on ubuntu-latest (never self-hosted), and gate its if: on BOTH has_new_commit and merge_into_upstream being 'true'.",
+          "fails_count": 1
+        },
+        "upstream_environment_scoped_to_one_job": {
+          "id": "upstream_environment_scoped_to_one_job",
+          "cmd": "[ \"$(yq -r '[.jobs[] | select(.environment == \"upstream-pr\")] | length' $PROJECT_ROOT/.github/workflows/coding-agent.yml)\" = \"1\" ]",
+          "description": "Structural: exactly one job in coding-agent.yml may declare environment: upstream-pr. Adding the environment to the self-hosted agent job would re-expose the PAT.",
+          "fails_count": 1
+        },
+        "upstream_pr_token_scoped_to_one_job": {
+          "id": "upstream_pr_token_scoped_to_one_job",
+          "cmd": "JOBS=$(yq -r '.jobs | to_entries[] | select(.value | tostring | test(\"secrets\\\\.UPSTREAM_PR_TOKEN\")) | .key' $PROJECT_ROOT/.github/workflows/coding-agent.yml | sort -u); [ \"$JOBS\" = \"open-upstream-pr\" ]",
+          "description": "Structural: secrets.UPSTREAM_PR_TOKEN must appear in exactly the open-upstream-pr job and no other. Keeps the PAT out of the self-hosted runner.",
+          "fails_count": 1
+        },
+        "same_repo_pr_excludes_upstream_mode": {
+          "id": "same_repo_pr_excludes_upstream_mode",
+          "cmd": "OUT=$(yq -r '.jobs | to_entries[] | select(.key != \"open-upstream-pr\") | .value.steps[]? | select(.run and (.run | test(\"gh pr create\"))) | (.if // \"\")' $PROJECT_ROOT/.github/workflows/coding-agent.yml); [ -z \"$OUT\" ] || ! echo \"$OUT\" | grep -vqE \"merge_into_upstream != 'true'\"",
+          "description": "Structural: any step outside the open-upstream-pr job that calls 'gh pr create' must be guarded by merge_into_upstream != 'true' in its if:. Prevents double-opening when upstream mode is active, regardless of which job hosts the fork-PR step.",
+          "fails_count": 1
+        },
+        "run_agent_is_self_hosted": {
+          "id": "run_agent_is_self_hosted",
+          "cmd": "yq -r '.jobs[\"run-agent\"].\"runs-on\" | .[]' $PROJECT_ROOT/.github/workflows/coding-agent.yml | grep -qx self-hosted",
+          "description": "Structural: run-agent must include the self-hosted label in runs-on. The agent executes untrusted code; running it on a shared ubuntu-latest runner would co-locate that code with other GitHub-hosted jobs and violate the isolation model the PAT scoping depends on.",
+          "fails_count": 1
+        }
+      }
+    }
+  }
+}

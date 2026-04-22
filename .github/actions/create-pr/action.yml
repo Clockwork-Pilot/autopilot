@@ -1,0 +1,45 @@
+name: Create PR
+description: Create a pull request referencing an issue. Shared by fork-PR and upstream-PR flows.
+inputs:
+  gh-token:
+    description: Token with pull-requests:write on the target repo.
+    required: true
+  pr-repo:
+    description: Target repository (owner/name) to open the PR in.
+    required: true
+  pr-head:
+    description: Head ref. Same-repo branch name, or `owner:branch` for cross-repo.
+    required: true
+  pr-title:
+    description: Issue title (will be prefixed with [AGENT]).
+    required: true
+  issue-ref:
+    description: "Issue reference for body (e.g. owner/repo#123)."
+    required: true
+  commit-body:
+    description: Commit message body appended after the issue reference.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN:    ${{ inputs.gh-token }}
+        PR_REPO:     ${{ inputs.pr-repo }}
+        PR_HEAD:     ${{ inputs.pr-head }}
+        PR_TITLE:    ${{ inputs.pr-title }}
+        ISSUE_REF:   ${{ inputs.issue-ref }}
+        COMMIT_BODY: ${{ inputs.commit-body }}
+      run: |
+        set -e
+        {
+          echo "Refs $ISSUE_REF"
+          echo
+          printf '%s\n' "$COMMIT_BODY"
+        } > /tmp/pr-body.md
+        gh pr create \
+          --repo "$PR_REPO" \
+          --title "[AGENT] $PR_TITLE" \
+          --body-file /tmp/pr-body.md \
+          --head "$PR_HEAD" \
+          || true   # tolerate 'pr already exists' on re-runs

@@ -1,0 +1,7 @@
+{
+  "needs.parse-issue.outputs.pr_branch": "",
+  "needs.parse-issue.outputs.agent_branch_default": "agent/42-fix-my-feature",
+  "needs.gather-repo-facts.outputs.existing_agent_branch": "",
+  "needs.parse-issue.outputs.base_branch": "develop",
+  "needs.gather-repo-facts.outputs.default_branch": "main"
+}

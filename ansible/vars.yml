@@ -1,0 +1,10 @@
+# runner_repo: mandatory — pass via -e runner_repo=<github-username>/<your-repo>
+runner_name: "{{ ansible_facts['hostname'] }}"
+runner_github_username: "{{ lookup('pipe', 'git config user.username') }}"
+claude_extra_docker_args: ""                                                    # optional extra docker run args, e.g. "-v /mydata:/mydata"
+runner_labels: "coding-agent,{{ runner_github_username }}"
+runner_install_dir: "{{ ansible_facts['env']['HOME'] }}/.local/share/github-runner"
+runner_version: "2.333.1"
+runner_arch: "x64"
+runner_tarball: "actions-runner-linux-{{ runner_arch }}-{{ runner_version }}.tar.gz"
+runner_download_url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/{{ runner_tarball }}"

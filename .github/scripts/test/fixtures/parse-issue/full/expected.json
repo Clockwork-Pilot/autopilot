@@ -1,0 +1,9 @@
+{
+  "agent_branch_default": "agent/42-feat-add-caf-support-v2",
+  "agent_task_text": "Implement the feature.\n\nStep 1: do X.",
+  "base_branch": "",
+  "merge_into_upstream": "",
+  "model": "claude-haiku-4-5",
+  "pr_branch": "",
+  "timeout_secs": "1800"
+}

@@ -1,0 +1,9 @@
+{
+  "agent_branch_default": "agent/999-this-is-a-very-long-issue-title-that-should-definitely-exceed-the-one-hundred-character-limit-impose",
+  "agent_task_text": "Do the thing.",
+  "base_branch": "",
+  "merge_into_upstream": "",
+  "model": "claude-sonnet-4-6",
+  "pr_branch": "",
+  "timeout_secs": "300"
+}

@@ -1,0 +1,4 @@
+/workspace/spec-checks.k.json
+/workspace/spec-checks.k.md
+/workspace/spec.k.json
+/workspace/spec.k.md

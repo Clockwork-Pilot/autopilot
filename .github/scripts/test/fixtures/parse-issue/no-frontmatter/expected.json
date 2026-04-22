@@ -1,0 +1,9 @@
+{
+  "agent_branch_default": "agent/7-simple-task",
+  "agent_task_text": "Just a plain body.\nNo frontmatter here.",
+  "base_branch": "",
+  "merge_into_upstream": "",
+  "model": "claude-haiku-4-5",
+  "pr_branch": "",
+  "timeout_secs": "600"
+}

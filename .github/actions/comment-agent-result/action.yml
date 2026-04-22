@@ -1,0 +1,47 @@
+name: Comment agent result on issue
+description: Post the constraints report (and a no-PR note when applicable) to the originating issue.
+inputs:
+  gh-token:
+    description: Token with issues:write on the issue's repo.
+    required: true
+  repo:
+    description: "Repository hosting the issue (owner/name)."
+    required: true
+  issue-number:
+    description: Issue number to comment on.
+    required: true
+  constraints-md:
+    description: Constraints report body (from run-agent output).
+    required: true
+  has-new-commit:
+    description: "'true' if the agent produced a commit."
+    required: true
+  agent-exit-code:
+    description: Agent container exit code (used to frame the no-commit message).
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN:        ${{ inputs.gh-token }}
+        REPO:            ${{ inputs.repo }}
+        ISSUE_NUMBER:    ${{ inputs.issue-number }}
+        CONSTRAINTS_MD:  ${{ inputs.constraints-md }}
+        HAS_NEW_COMMIT:  ${{ inputs.has-new-commit }}
+        AGENT_EXIT_CODE: ${{ inputs.agent-exit-code }}
+      run: |
+        set -e
+        printf '%s\n' "$CONSTRAINTS_MD" > /tmp/constraints.md
+        if [ "$HAS_NEW_COMMIT" = "true" ]; then
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file /tmp/constraints.md
+        elif [ "$AGENT_EXIT_CODE" = "0" ]; then
+          {
+            echo "Agent ran successfully but produced no new commit."
+            echo
+            cat /tmp/constraints.md
+          } > /tmp/msg.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file /tmp/msg.md
+        else
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file /tmp/constraints.md
+        fi

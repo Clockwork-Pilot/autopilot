@@ -1,0 +1,32 @@
+name: Act Step Runner
+
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: 'Target workflow file (e.g., coding-agent.yml)'
+        required: true
+        type: string
+      step_id:
+        description: 'Step (job) id to run from the target workflow'
+        required: true
+        type: string
+      inputs_json:
+        description: 'JSON payload of inputs for the step'
+        required: false
+        type: string
+        default: '{}'
+      artifact_path:
+        description: 'Base path for artifacts'
+        required: false
+        type: string
+        default: /tmp/act-artifacts
+
+jobs:
+  executor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Dispatch
+        run: |
+          bash .github/scripts/act-step-dispatch.sh "${{ inputs.workflow }}" "${{ inputs.step_id }}" --inputs '${{ inputs.inputs_json }}' --artifact-server-path "${{ inputs.artifact_path }}"

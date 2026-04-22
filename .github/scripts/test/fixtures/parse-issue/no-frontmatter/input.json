@@ -1,0 +1,5 @@
+{
+  "needs.fetch-issue.outputs.title": "Simple task",
+  "needs.fetch-issue.outputs.body_raw": "Just a plain body.\nNo frontmatter here.",
+  "inputs.issue_number": "7"
+}

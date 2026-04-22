@@ -1,0 +1,146 @@
+---
+- name: Install GitHub Actions self-hosted runner
+  hosts: local
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Validate required external vars
+      assert:
+        that:
+          - runner_repo is defined and runner_repo | length > 0
+          - runner_token is defined and runner_token | length > 0
+          - docker_files is defined and docker_files | length > 0
+        fail_msg: |
+          Missing required vars. Pass them via -e, e.g.:
+            ansible-playbook -i inventory.ini playbook.yml \
+              -e runner_token=XXXX \
+              -e runner_repo=<github-username>/<your-repo> \
+              -e runner_github_username=<github-username> \
+              -e docker_files=/abs/path/to/docker-files
+
+    # python-yq (kislyuk/yq) is a runtime prerequisite for the coding-agent
+    # workflow — get-issue-details.sh uses it to parse issue YAML frontmatter.
+    # pip3 and jq (yq's runtime dep) must exist on the host.
+    #
+    # We use `command` with `creates:` instead of the `pip` module because if
+    # yq is already installed in any prefix that the active python3 sees,
+    # Ansible's pip module reports "already satisfied" and skips — leaving
+    # nothing at ~/.local/bin. --force-reinstall + --user guarantees the
+    # binary lands in the user-base, which is what the PATH override expects.
+    - name: Install python-yq into ~/.local/bin
+      command: python3 -m pip install --user --force-reinstall yq
+      args:
+        creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/yq"
+
+    - name: Ensure runner install directory exists
+      file:
+        path: "{{ runner_install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download runner tarball
+      get_url:
+        url: "{{ runner_download_url }}"
+        dest: "/tmp/{{ runner_tarball }}"
+        mode: "0644"
+
+    - name: Extract runner tarball
+      unarchive:
+        src: "/tmp/{{ runner_tarball }}"
+        dest: "{{ runner_install_dir }}"
+        remote_src: yes
+        creates: "{{ runner_install_dir }}/config.sh"
+
+    - name: Stop runner service before reconfiguring
+      systemd:
+        name: "actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}"
+        state: stopped
+        scope: user
+      ignore_errors: yes
+
+    - name: Remove existing runner configuration
+      command:
+        cmd: ./config.sh remove --token {{ runner_token }}
+        chdir: "{{ runner_install_dir }}"
+      ignore_errors: yes
+
+    - name: Force remove runner config files if remove script failed
+      file:
+        path: "{{ runner_install_dir }}/{{ item }}"
+        state: absent
+      loop:
+        - .runner
+        - .runner_migrated
+        - .credentials
+        - .credentials_rsaparams
+
+    - name: Configure runner
+      command:
+        cmd: >
+          ./config.sh
+          --url https://github.com/{{ runner_repo }}
+          --token {{ runner_token }}
+          --name {{ runner_name }}
+          --labels {{ runner_labels }}
+          --unattended
+          --replace
+        chdir: "{{ runner_install_dir }}"
+
+    - name: Ensure systemd user service directory exists
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/systemd/user"
+        state: directory
+        mode: "0755"
+
+    - name: Install runner as systemd user service
+      copy:
+        content: |
+          [Unit]
+          Description=GitHub Actions Runner ({{ runner_repo | replace('/', '-') }}.{{ runner_name }})
+          After=network-online.target
+
+          [Service]
+          ExecStart={{ runner_install_dir }}/run.sh
+          WorkingDirectory={{ runner_install_dir }}
+          KillMode=process
+          KillSignal=SIGTERM
+          TimeoutStopSec=5min
+
+          [Install]
+          WantedBy=default.target
+        dest: "{{ ansible_facts['env']['HOME'] }}/.config/systemd/user/actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}.service"
+        mode: "0644"
+      notify: Reload and restart runner service
+
+    - name: Ensure systemd drop-in directory exists
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/systemd/user/actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}.service.d"
+        state: directory
+        mode: "0755"
+
+    - name: Set environment in runner service
+      copy:
+        content: |
+          [Service]
+          Environment="DOCKER_FILES={{ docker_files | mandatory }}"
+          Environment="CLAUDE_EXTRA_DOCKER_ARGS={{ claude_extra_docker_args }}"
+          Environment="PATH={{ ansible_facts['env']['HOME'] }}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        dest: "{{ ansible_facts['env']['HOME'] }}/.config/systemd/user/actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}.service.d/override.conf"
+      notify: Reload and restart runner service
+
+    - name: Enable and start runner service
+      systemd:
+        name: "actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+        scope: user
+
+  handlers:
+    - name: Reload and restart runner service
+      systemd:
+        name: "actions.runner.{{ runner_repo | replace('/', '.') }}.{{ runner_name }}"
+        state: restarted
+        daemon_reload: yes
+        scope: user

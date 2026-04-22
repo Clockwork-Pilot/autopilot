@@ -1,0 +1,5 @@
+{
+  "needs.fetch-issue.outputs.title": "This is a very long issue title that should definitely exceed the one hundred character limit imposed on generated branch slugs",
+  "needs.fetch-issue.outputs.body_raw": "---\ntimeout: 5\nmodel: claude-sonnet-4-6\n---\nDo the thing.",
+  "inputs.issue_number": "999"
+}

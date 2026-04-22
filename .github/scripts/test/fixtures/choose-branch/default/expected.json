@@ -1,0 +1,4 @@
+{
+  "branch": "agent/42-fix-my-feature",
+  "base_branch": "develop"
+}

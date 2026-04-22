@@ -1,0 +1,66 @@
+name: Image digest
+
+on:
+  workflow_call:
+    inputs:
+      image_repo:
+        description: Registry repo (e.g. ghcr.io/org/name), no tag.
+        required: false
+        default: ghcr.io/clockwork-pilot/autopilot-ws
+        type: string
+    outputs:
+      digest:
+        description: Manifest digest (sha256:...).
+        value: ${{ jobs.parse-digest.outputs.digest }}
+      image:
+        description: Digest-pinned image ref (<repo>@sha256:...).
+        value: ${{ jobs.parse-digest.outputs.image }}
+
+jobs:
+  fetch-manifest:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: ${{ inputs.image_repo }}
+    outputs:
+      manifest_json: ${{ steps.f.outputs.manifest_json }}
+    steps:
+      - id: f
+        run: |
+          set -e
+          if ! manifest=$(docker manifest inspect "${IMAGE_REPO}:latest" 2>&1); then
+            echo "::error::docker manifest inspect ${IMAGE_REPO}:latest failed:"
+            echo "$manifest"
+            exit 1
+          fi
+          compact=$(echo "$manifest" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)))')
+          echo "manifest_json=$compact" >> "$GITHUB_OUTPUT"
+
+  # Verified by: step_output_checks/parse_digest_cases
+  parse-digest:
+    needs: [fetch-manifest]
+    runs-on: ubuntu-latest
+    env:
+      MANIFEST_JSON: ${{ needs.fetch-manifest.outputs.manifest_json }}
+      IMAGE_REPO:    ${{ inputs.image_repo }}
+    outputs:
+      digest: ${{ steps.p.outputs.digest }}
+      image:  ${{ steps.p.outputs.image }}
+    steps:
+      - id: p
+        run: |
+          echo "$MANIFEST_JSON" | python3 -c '
+          import json, os, sys
+          m = json.load(sys.stdin)
+          if m.get("manifests"):
+              digest = m["manifests"][0].get("digest", "")
+          elif "config" in m:
+              digest = m["config"].get("digest", "")
+          else:
+              print("ERROR: no digest found in manifest", file=sys.stderr); sys.exit(1)
+          if not digest:
+              print("ERROR: digest is empty", file=sys.stderr); sys.exit(1)
+          image_repo = os.environ["IMAGE_REPO"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"digest={digest}\n")
+              f.write(f"image={image_repo}@{digest}\n")
+          '

@@ -1,0 +1,488 @@
+name: Coding Agent
+
+# Pure-library reusable workflow: callable only via `uses:` from a consumer
+# caller workflow (see autopilot-selftest for the canonical caller shape).
+# The consumer owns the event trigger (workflow_dispatch, issues labels,
+# etc.); this file is the implementation contract and nothing more.
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        description: GitHub username (matches self-hosted runner label)
+        required: true
+        type: string
+      issue_number:
+        description: Issue number to work on
+        required: true
+        type: string
+      agent_image:
+        description: |
+          Override base image. Accepts any ref docker can pull (tag or digest).
+          If unset, resolves the latest digest of ghcr.io/clockwork-pilot/autopilot-ws.
+        required: false
+        type: string
+        default: ""
+      image_setup_script:
+        description: |
+          Optional bash snippet layered onto the base image as root (FROM base / RUN <script>).
+          Use for apt/pip/system-level deps. Workspace is NOT mounted — this runs at image-build time.
+          Cached by script hash on the runner; re-runs only when the script changes.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      UPSTREAM_PR_TOKEN:
+        description: PAT used by open-upstream-pr when merge_into_upstream is true. Optional — only issues that opt in require it.
+        required: false
+
+jobs:
+  fetch-issue:
+    runs-on: ubuntu-latest
+    outputs:
+      title:    ${{ steps.f.outputs.title }}
+      body_raw: ${{ steps.f.outputs.body_raw }}
+    steps:
+      - name: fetch
+        id: f
+        env:
+          GH_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          REPO:         ${{ github.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          J=$(gh api "repos/$REPO/issues/$ISSUE_NUMBER")
+          echo "title=$(echo "$J" | jq -r .title)" >> "$GITHUB_OUTPUT"
+          { echo "body_raw<<EOF_BODY_RAW"; echo "$J" | jq -r '.body // ""'; echo "EOF_BODY_RAW"; } >> "$GITHUB_OUTPUT"
+
+  # Verified by: step_output_checks/parse_issue_output
+  parse-issue:
+    needs: fetch-issue
+    runs-on: ubuntu-latest
+    env:
+      TITLE:        ${{ needs.fetch-issue.outputs.title }}
+      BODY_RAW:     ${{ needs.fetch-issue.outputs.body_raw }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+    outputs:
+      agent_task_text:      ${{ steps.p.outputs.agent_task_text }}
+      pr_branch:            ${{ steps.p.outputs.pr_branch }}
+      base_branch:          ${{ steps.p.outputs.base_branch }}
+      timeout_secs:         ${{ steps.p.outputs.timeout_secs }}
+      model:                ${{ steps.p.outputs.model }}
+      agent_branch_default: ${{ steps.p.outputs.agent_branch_default }}
+      merge_into_upstream:  ${{ steps.p.outputs.merge_into_upstream }}
+    steps:
+      - name: parse
+        id: p
+        run: |
+          TITLE="${TITLE:-}"
+          BODY_RAW="${BODY_RAW:-}"
+          ISSUE_NUMBER_IN="${ISSUE_NUMBER:-}"
+
+          # Strip CR (GitHub issue bodies are CRLF)
+          BODY_RAW=$(printf '%s' "$BODY_RAW" | tr -d '\r')
+
+          BRANCH_SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-\+/-/g;s/^-//;s/-$//' | cut -c1-100)
+
+          # Only strip frontmatter when at least two `---` fences are present;
+          # otherwise sed '0,/---/d' would delete through EOF and wipe the body.
+          DELIM_COUNT=$(printf '%s\n' "$BODY_RAW" | grep -c '^---[[:space:]]*$' || true)
+          if [ "${DELIM_COUNT:-0}" -ge 2 ]; then
+            AGENT_TASK_TEXT=$(printf '%s\n' "$BODY_RAW" | sed '0,/^---[[:space:]]*$/d' | sed '0,/^---[[:space:]]*$/d')
+            YAML_PART=$(printf '%s\n' "$BODY_RAW" | sed -n '/^---[[:space:]]*$/,/^---[[:space:]]*$/p' | sed '1d;$d')
+          else
+            AGENT_TASK_TEXT="$BODY_RAW"
+            YAML_PART=""
+          fi
+          PR_BRANCH=""
+          BASE_BRANCH=""
+          TIMEOUT_MINS=""
+          MODEL=""
+          MERGE_INTO_UPSTREAM=""
+          if [ -n "$YAML_PART" ]; then
+            PR_BRANCH=$(echo "$YAML_PART" | yq -r '.pr_branch // ""')
+            BASE_BRANCH=$(echo "$YAML_PART" | yq -r '.base_branch // ""')
+            TIMEOUT_MINS=$(echo "$YAML_PART" | yq -r '.timeout // ""')
+            MODEL=$(echo "$YAML_PART" | yq -r '.model // ""')
+            MERGE_INTO_UPSTREAM=$(echo "$YAML_PART" | yq -r '.merge_into_upstream // ""')
+          fi
+          [ "$PR_BRANCH" = "null" ] && PR_BRANCH=""
+          [ "$BASE_BRANCH" = "null" ] && BASE_BRANCH=""
+          [ "$TIMEOUT_MINS" = "null" ] && TIMEOUT_MINS=""
+          [ "$MODEL" = "null" ] && MODEL=""
+          [ "$MERGE_INTO_UPSTREAM" = "null" ] && MERGE_INTO_UPSTREAM=""
+          # Normalize to "true" / "" — only the literal true enables upstream PR.
+          if [ "$MERGE_INTO_UPSTREAM" = "true" ]; then
+            MERGE_INTO_UPSTREAM="true"
+          else
+            MERGE_INTO_UPSTREAM=""
+          fi
+
+          TIMEOUT_SECS=$(( ${TIMEOUT_MINS:-10} * 60 ))
+          MODEL="${MODEL:-claude-haiku-4-5}"
+          AGENT_BRANCH_DEFAULT="agent/${ISSUE_NUMBER_IN}-${BRANCH_SLUG}"
+
+          : "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
+          echo "pr_branch=$PR_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "timeout_secs=$TIMEOUT_SECS" >> "$GITHUB_OUTPUT"
+          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+          echo "agent_branch_default=$AGENT_BRANCH_DEFAULT" >> "$GITHUB_OUTPUT"
+          echo "merge_into_upstream=$MERGE_INTO_UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "agent_task_text<<EOF_AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
+          echo "EOF_AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
+
+  validate-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate runner availability
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNNER_LABEL: ${{ inputs.runner_label }}
+        run: |
+          echo "::group::Validating Runner"
+          echo "Checking for self-hosted runner with label: $RUNNER_LABEL"
+
+          runners=$(gh api repos/${{ github.repository }}/actions/runners \
+            --jq '.runners[] | select(.labels[].name == "'$RUNNER_LABEL'") | .id' 2>/dev/null || echo "")
+
+          if [ -z "$runners" ]; then
+            echo "::error::No self-hosted runner found with label '$RUNNER_LABEL'"
+            echo ""
+            echo "Available runners:"
+            gh api repos/${{ github.repository }}/actions/runners \
+              --jq '.runners[] | "\(.id): \(.name) (labels: \(.labels[].name | join(", ")))"' || true
+            exit 1
+          fi
+
+          echo "✓ Found runner(s) with label: $RUNNER_LABEL"
+          echo "::endgroup::"
+
+  gather-repo-facts:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+      REPO:         ${{ github.repository }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+    outputs:
+      existing_agent_branch: ${{ steps.g.outputs.existing_agent_branch }}
+      default_branch:        ${{ steps.g.outputs.default_branch }}
+    steps:
+      - name: gather
+        id: g
+        run: |
+          EXISTING=$(gh api "repos/$REPO/branches" --paginate -q ".[].name" \
+            | grep -E "^agent/$ISSUE_NUMBER(-|$)" | head -1 || true)
+          DEFAULT=$(gh api "repos/$REPO" -q .default_branch)
+          echo "existing_agent_branch=$EXISTING" >> "$GITHUB_OUTPUT"
+          echo "default_branch=$DEFAULT" >> "$GITHUB_OUTPUT"
+
+  # Verified by: step_output_checks/choose_branch_output
+  choose-branch:
+    needs: [parse-issue, gather-repo-facts]
+    runs-on: ubuntu-latest
+    env:
+      PR_BRANCH:             ${{ needs.parse-issue.outputs.pr_branch }}
+      AGENT_BRANCH_DEFAULT:  ${{ needs.parse-issue.outputs.agent_branch_default }}
+      EXISTING_AGENT_BRANCH: ${{ needs.gather-repo-facts.outputs.existing_agent_branch }}
+      BASE_FROM_ISSUE:       ${{ needs.parse-issue.outputs.base_branch }}
+      DEFAULT_BRANCH:        ${{ needs.gather-repo-facts.outputs.default_branch }}
+    outputs:
+      branch:      ${{ steps.c.outputs.branch }}
+      base_branch: ${{ steps.c.outputs.base_branch }}
+    steps:
+      - name: choose
+        id: c
+        run: |
+          BRANCH="${PR_BRANCH:-${EXISTING_AGENT_BRANCH:-$AGENT_BRANCH_DEFAULT}}"
+          BASE="${BASE_FROM_ISSUE:-$DEFAULT_BRANCH}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "base_branch=$BASE" >> "$GITHUB_OUTPUT"
+
+  # Always runs (cheap: one `docker manifest inspect` call). Its output is
+  # ignored when inputs.agent_image is set — prepare-image picks the override
+  # in that case. Keeping it unconditional means every downstream job can rely
+  # on the default success() gate instead of custom skip-tolerant conditions.
+  image-digest:
+    uses: ./.github/workflows/image-digest.yml
+
+  # Picks the base image (user override or resolved digest) and, if
+  # image_setup_script is set, builds a thin derived image on the runner
+  # (FROM base / RUN <script>) tagged by sha256 of the script so repeat runs
+  # reuse docker's layer cache. Emits the final image ref for run-agent.
+  prepare-image:
+    needs: [validate-runner, image-digest]
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    outputs:
+      image: ${{ steps.prep.outputs.image }}
+    steps:
+      - name: Resolve and prepare image
+        id: prep
+        env:
+          USER_AGENT_IMAGE:   ${{ inputs.agent_image }}
+          RESOLVED_IMAGE:     ${{ needs.image-digest.outputs.image }}
+          IMAGE_SETUP_SCRIPT: ${{ inputs.image_setup_script }}
+        run: |
+          set -euo pipefail
+
+          BASE="${USER_AGENT_IMAGE:-$RESOLVED_IMAGE}"
+          if [ -z "$BASE" ]; then
+            echo "::error::Could not determine base image — both inputs.agent_image and image-digest output are empty"
+            exit 1
+          fi
+
+          if [ -z "$IMAGE_SETUP_SCRIPT" ]; then
+            echo "::notice::No image_setup_script provided — using base image as-is: $BASE"
+            echo "image=$BASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CTX=$(mktemp -d)
+          trap 'rm -rf "$CTX"' EXIT
+
+          printf '%s' "$IMAGE_SETUP_SCRIPT" > "$CTX/setup.sh"
+          chmod +x "$CTX/setup.sh"
+          SCRIPT_HASH=$(sha256sum "$CTX/setup.sh" | cut -c1-16)
+          BASE_HASH=$(printf '%s' "$BASE" | sha256sum | cut -c1-16)
+          TAG="autopilot-prepared:${BASE_HASH}-${SCRIPT_HASH}"
+
+          cat > "$CTX/Dockerfile" <<EOF
+          # syntax=docker/dockerfile:1
+          FROM $BASE
+          USER 0
+          COPY setup.sh /tmp/autopilot-setup.sh
+          RUN bash /tmp/autopilot-setup.sh && rm /tmp/autopilot-setup.sh
+          # Drop back to the image's default user (image-defined USER directive
+          # is preserved across FROM, so this reassertion is explicit, not new).
+          USER node
+          EOF
+
+          echo "::notice::Building prepared image $TAG from $BASE (script hash: $SCRIPT_HASH)"
+          docker build -t "$TAG" "$CTX"
+          echo "image=$TAG" >> "$GITHUB_OUTPUT"
+
+  run-agent:
+    needs: [validate-runner, fetch-issue, parse-issue, choose-branch, image-digest, prepare-image]
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    outputs:
+      has_new_commit:  ${{ steps.detect-new-commit.outputs.has_new_commit }}
+      agent_exit_code: ${{ steps.agent.outputs.exit_code }}
+      constraints_md:  ${{ steps.constraints-out.outputs.body }}
+      commit_msg:      ${{ steps.commit-msg.outputs.body }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo into isolated workspace
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout work branch
+        env:
+          BRANCH:      ${{ needs.choose-branch.outputs.branch }}
+          BASE_BRANCH: ${{ needs.choose-branch.outputs.base_branch }}
+        run: |
+          git fetch origin
+          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+            echo "::notice::Resuming existing work branch: $BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            echo "::notice::Creating new work branch: $BRANCH (base: $BASE_BRANCH)"
+            git checkout -B "$BRANCH" "origin/$BASE_BRANCH"
+          fi
+
+      - name: Prepare docker-files directories
+        run: |
+          # DOCKER_FILES must be set in the self-hosted runner's service env
+          # (e.g. actions-runner/.env). It points at the host dir holding
+          # persistent Claude credentials/cargo caches mounted into the agent.
+          : "${DOCKER_FILES:?DOCKER_FILES not set in runner env — configure it in the runner service env (actions-runner/.env)}"
+          mkdir -p "$DOCKER_FILES/.credentials" "$DOCKER_FILES/.cargo" "$DOCKER_FILES/.local"
+          [ -s "$DOCKER_FILES/.claude.local.json" ] || printf '{}\n' > "$DOCKER_FILES/.claude.local.json"
+
+      # Image is either (a) locally built by prepare-image, or (b) a registry
+      # ref. docker run will pull (b) lazily; (a) is already present. No login
+      # needed for the default ghcr.io/clockwork-pilot/autopilot-ws (public).
+      # If a user's custom agent_image is private, they must configure a docker
+      # login step earlier in their own caller workflow.
+
+      - name: Run Claude agent in Docker
+        id: agent
+        env:
+          MODEL:        ${{ needs.parse-issue.outputs.model }}
+          TIMEOUT_SECS: ${{ needs.parse-issue.outputs.timeout_secs }}
+          PROMPT:       ${{ needs.parse-issue.outputs.agent_task_text }}
+          AGENT_IMAGE:  ${{ needs.prepare-image.outputs.image }}
+        run: |
+          echo "::group::Claude Agent Output"
+          set +e
+          bash .github/scripts/run-in-docker-claude.sh
+          EXIT_CODE=$?
+          echo "::endgroup::"
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Run constraint checks
+        id: constraints
+        if: always()
+        env:
+          AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+        run: |
+          # stdout → issue comment; exit code gates the commit step.
+          set +e
+          bash .github/scripts/run-in-docker-no-claude.sh \
+            'check_spec_constraints.py --dry-run' \
+            > /tmp/constraints.md 2>&1
+          EXIT_CODE=$?
+          set -e
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Export constraints report as job output
+        id: constraints-out
+        if: always()
+        run: |
+          {
+            echo "body<<EOF_CONSTRAINTS_BODY"
+            cat /tmp/constraints.md 2>/dev/null || echo "(no constraints report produced)"
+            echo "EOF_CONSTRAINTS_BODY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Record HEAD before commit
+        id: head-before
+        if: always()
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Agent commit
+        id: agent-commit
+        if: always() && steps.agent.outputs.exit_code == '0' && steps.constraints.outputs.exit_code == '0'
+        env:
+          MODEL:       ${{ needs.parse-issue.outputs.model }}
+          PROMPT:      commit changes
+          AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+        run: bash .github/scripts/run-in-docker-claude.sh --allow-git-commit || true
+
+      - name: Detect new commit
+        id: detect-new-commit
+        if: always()
+        run: |
+          if [ "${{ steps.head-before.outputs.sha }}" != "$(git rev-parse HEAD)" ]; then
+            echo "has_new_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_new_commit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push branch
+        if: steps.detect-new-commit.outputs.has_new_commit == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ needs.choose-branch.outputs.branch }}"
+          git push origin "$BRANCH"
+
+      - name: Capture last commit message for PR body
+        id: commit-msg
+        if: steps.detect-new-commit.outputs.has_new_commit == 'true'
+        run: |
+          {
+            echo "body<<EOF_COMMIT_BODY"
+            git log -1 --pretty=%B HEAD
+            echo "EOF_COMMIT_BODY"
+          } >> "$GITHUB_OUTPUT"
+
+  # Fork-PR creation and issue commenting split off the self-hosted runner.
+  # Only needs GITHUB_TOKEN; does not require the agent runner or Docker.
+  open-pr:
+    needs: [fetch-issue, parse-issue, choose-branch, run-agent]
+    # Handles: (a) fork-PR flow end-to-end, and (b) issue commenting for the
+    # upstream-no-commit case (where open-upstream-pr is gated off). The
+    # upstream-with-commit case is owned by open-upstream-pr.
+    if: |
+      always() && needs.run-agent.result != 'skipped' && needs.run-agent.result != 'cancelled'
+      && (needs.parse-issue.outputs.merge_into_upstream != 'true'
+          || needs.run-agent.outputs.has_new_commit != 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Check out repo (for composite actions)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Open PR inside fork
+        if: needs.run-agent.outputs.has_new_commit == 'true' && needs.parse-issue.outputs.merge_into_upstream != 'true'
+        uses: ./.github/actions/create-pr
+        with:
+          gh-token:    ${{ secrets.GITHUB_TOKEN }}
+          pr-repo:     ${{ github.repository }}
+          pr-head:     ${{ needs.choose-branch.outputs.branch }}
+          pr-title:    ${{ needs.fetch-issue.outputs.title }}
+          issue-ref:   ${{ github.repository }}#${{ inputs.issue_number }}
+          commit-body: ${{ needs.run-agent.outputs.commit_msg }}
+
+      - name: Comment agent result on issue
+        uses: ./.github/actions/comment-agent-result
+        with:
+          gh-token:        ${{ secrets.GITHUB_TOKEN }}
+          repo:            ${{ github.repository }}
+          issue-number:    ${{ inputs.issue_number }}
+          constraints-md:  ${{ needs.run-agent.outputs.constraints_md }}
+          has-new-commit:  ${{ needs.run-agent.outputs.has_new_commit }}
+          agent-exit-code: ${{ needs.run-agent.outputs.agent_exit_code }}
+
+  # Cross-repo PR from fork → upstream. Isolated on a GitHub-hosted runner so
+  # UPSTREAM_PR_TOKEN never enters the self-hosted agent job. The `upstream-pr`
+  # environment must exist in fork settings with UPSTREAM_PR_TOKEN set;
+  # see autopilot-ws/README.md "Opening PRs against the upstream repo".
+  open-upstream-pr:
+    needs: [fetch-issue, parse-issue, choose-branch, run-agent]
+    if: needs.run-agent.outputs.has_new_commit == 'true' && needs.parse-issue.outputs.merge_into_upstream == 'true'
+    runs-on: ubuntu-latest
+    environment: upstream-pr
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out repo (for composite actions)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Resolve upstream repo
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM=$(gh api "repos/${{ github.repository }}" -q '.parent.full_name // ""')
+          if [ -z "$UPSTREAM" ]; then
+            echo "::error::merge_into_upstream: true but ${{ github.repository }} has no parent (not a fork)"
+            exit 1
+          fi
+          echo "full_name=$UPSTREAM" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure UPSTREAM_PR_TOKEN is configured
+        env:
+          UPSTREAM_PR_TOKEN: ${{ secrets.UPSTREAM_PR_TOKEN }}
+        run: |
+          : "${UPSTREAM_PR_TOKEN:?UPSTREAM_PR_TOKEN is not set in the 'upstream-pr' environment — see autopilot-ws/README.md 'Opening PRs against the upstream repo (optional)'}"
+
+      - name: Open PR against upstream
+        uses: ./.github/actions/create-pr
+        with:
+          gh-token:    ${{ secrets.UPSTREAM_PR_TOKEN }}
+          pr-repo:     ${{ steps.upstream.outputs.full_name }}
+          pr-head:     ${{ github.repository_owner }}:${{ needs.choose-branch.outputs.branch }}
+          pr-title:    ${{ needs.fetch-issue.outputs.title }}
+          issue-ref:   ${{ github.repository }}#${{ inputs.issue_number }}
+          commit-body: ${{ needs.run-agent.outputs.commit_msg }}
+
+      - name: Comment agent result on issue
+        uses: ./.github/actions/comment-agent-result
+        with:
+          gh-token:        ${{ secrets.GITHUB_TOKEN }}
+          repo:            ${{ github.repository }}
+          issue-number:    ${{ inputs.issue_number }}
+          constraints-md:  ${{ needs.run-agent.outputs.constraints_md }}
+          has-new-commit:  ${{ needs.run-agent.outputs.has_new_commit }}
+          agent-exit-code: ${{ needs.run-agent.outputs.agent_exit_code }}
