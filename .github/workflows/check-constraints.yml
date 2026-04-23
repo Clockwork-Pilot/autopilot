@@ -1,70 +1,16 @@
 name: Check Constraints
 
-# Pure-library reusable workflow: callable only via `uses:` from a consumer
-# caller workflow. The consumer owns the event trigger (push, pull_request,
-# etc.); this file runs the constraint checker against whatever repo the
-# caller has checked out into $GITHUB_WORKSPACE.
+# Reusable workflow: thin shim over the check-constraints composite action.
+# Exists so consumers that want workflow-level composition (matrix, env,
+# reviewer gates) can still `uses:` this file. Consumers that want the
+# flat run-graph form can bypass this and reference the action directly:
+#   uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@<ref>
 on:
   workflow_call:
 
 jobs:
-  image-digest:
-    uses: ./.github/workflows/image-digest.yml
-
   check-constraints:
-    name: check-constraints
-    needs: [image-digest]
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      # No ghcr.io login needed: ghcr.io/clockwork-pilot/autopilot-ws is a public package.
-      # If it's ever made private again, re-add a docker login step with a PAT.
-
-      - name: Cache Docker image
-        id: cache-image
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: /tmp/autopilot-ws.tar
-          key: docker-autopilot-ws-${{ needs.image-digest.outputs.digest }}
-
-      - name: Load cached image
-        if: steps.cache-image.outputs.cache-hit == 'true'
-        env:
-          AGENT_IMAGE: ${{ needs.image-digest.outputs.image }}
-        run: |
-          set -e
-          if [ ! -f /tmp/autopilot-ws.tar ]; then
-            echo "::error::Cache hit reported but /tmp/autopilot-ws.tar not found"
-            exit 1
-          fi
-          docker load < /tmp/autopilot-ws.tar
-
-      - name: Pull image and save to cache
-        if: steps.cache-image.outputs.cache-hit != 'true'
-        env:
-          AGENT_IMAGE: ${{ needs.image-digest.outputs.image }}
-        run: |
-          set -e
-          docker pull "$AGENT_IMAGE"
-          docker save "$AGENT_IMAGE" > /tmp/autopilot-ws.tar
-
-      - name: Run constraint checks
-        id: constraints
-        env:
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-          AGENT_IMAGE: ${{ needs.image-digest.outputs.image }}
-        run: |
-          echo "::group::Constraint Checks"
-          bash ${{ github.workspace }}/.github/scripts/run-in-docker-no-claude.sh \
-            "check_spec_constraints.py || { \
-              echo '--- Spec checks results ---'; \
-              cat /workspace/spec-checks.k.md; \
-              echo '--- testrunner failures ---'; \
-              grep 'errors out of' /sqlite/testrunner.log 2>/dev/null | grep -v '^0 errors' || echo '(no testrunner.log failures found)'; exit 1; }" || {
-            echo "::error::Constraint checks failed"
-            exit 1
-          }
-          echo "::endgroup::"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: ./.github/actions/check-constraints

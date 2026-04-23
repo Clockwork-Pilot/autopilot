@@ -1,0 +1,26 @@
+name: Check Constraints Action Test
+
+# Test harness for the check-constraints composite action. Invoked by act
+# from the step_output_checks constraint. Runs the action against this
+# repo's own spec, so a broken action fails the test.
+on:
+  workflow_dispatch:
+    inputs:
+      image_repo:
+        description: Override image_repo for test runs.
+        required: false
+        default: ghcr.io/clockwork-pilot/autopilot-ws
+      command:
+        description: Override command.
+        required: false
+        default: check_spec_constraints.py --features workflow_hygiene
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: ./.github/actions/check-constraints
+        with:
+          image_repo: ${{ inputs.image_repo }}
+          command:    ${{ inputs.command }}

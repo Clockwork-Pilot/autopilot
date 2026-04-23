@@ -1,0 +1,61 @@
+name: check-constraints
+description: Run check_spec_constraints.py against the caller's checked-out workspace, using the autopilot-ws docker image.
+
+inputs:
+  image_repo:
+    description: Registry repo for the constraint-check toolchain image.
+    required: false
+    default: ghcr.io/clockwork-pilot/autopilot-ws
+  command:
+    description: Command to run inside the image. Default runs the constraint checker.
+    required: false
+    default: check_spec_constraints.py
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        IMAGE_REPO: ${{ inputs.image_repo }}
+      run: |
+        set -e
+        manifest=$(docker manifest inspect "$IMAGE_REPO:latest")
+        {
+          echo "manifest_json<<EOF_MANIFEST"
+          echo "$manifest"
+          echo "EOF_MANIFEST"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: digest
+      uses: ./.github/actions/parse-digest
+      with:
+        manifest_json: ${{ steps.fetch.outputs.manifest_json }}
+        image_repo:    ${{ inputs.image_repo }}
+
+    - id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: /tmp/autopilot-ws.tar
+        key: docker-autopilot-ws-${{ steps.digest.outputs.image }}
+
+    - id: load
+      shell: bash
+      if: steps.cache.outputs.cache-hit == 'true'
+      run: docker load < /tmp/autopilot-ws.tar
+
+    - id: pull
+      shell: bash
+      if: steps.cache.outputs.cache-hit != 'true'
+      env:
+        AGENT_IMAGE: ${{ steps.digest.outputs.image }}
+      run: |
+        docker pull "$AGENT_IMAGE"
+        docker save "$AGENT_IMAGE" > /tmp/autopilot-ws.tar
+
+    - id: run
+      shell: bash
+      env:
+        AGENT_IMAGE: ${{ steps.digest.outputs.image }}
+        CMD: ${{ inputs.command }}
+      run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"
