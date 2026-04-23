@@ -53,10 +53,13 @@ jobs:
           echo "title=$(echo "$J" | jq -r .title)" >> "$GITHUB_OUTPUT"
           { echo "body_raw<<EOF_BODY_RAW"; echo "$J" | jq -r '.body // ""'; echo "EOF_BODY_RAW"; } >> "$GITHUB_OUTPUT"
 
-  # Verified by: step_output_checks/parse_issue_output
+  # Verified by: step_output_checks/parse_issue_via_action
   parse-issue:
     needs: fetch-issue
     runs-on: ubuntu-latest
+    # env: block retained for the coding_agent_steps/parse_issue_consumes_fetch_issue
+    # invariant (asserts this job's inputs come from fetch-issue / workflow inputs).
+    # Values are also forwarded via `with:` to the composite action below.
     env:
       TITLE:        ${{ needs.fetch-issue.outputs.title }}
       BODY_RAW:     ${{ needs.fetch-issue.outputs.body_raw }}
@@ -70,66 +73,13 @@ jobs:
       agent_branch_default: ${{ steps.p.outputs.agent_branch_default }}
       merge_into_upstream:  ${{ steps.p.outputs.merge_into_upstream }}
     steps:
-      - name: parse
-        id: p
-        run: |
-          TITLE="${TITLE:-}"
-          BODY_RAW="${BODY_RAW:-}"
-          ISSUE_NUMBER_IN="${ISSUE_NUMBER:-}"
-
-          # Strip CR (GitHub issue bodies are CRLF)
-          BODY_RAW=$(printf '%s' "$BODY_RAW" | tr -d '\r')
-
-          BRANCH_SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-\+/-/g;s/^-//;s/-$//' | cut -c1-100)
-
-          # Only strip frontmatter when at least two `---` fences are present;
-          # otherwise sed '0,/---/d' would delete through EOF and wipe the body.
-          DELIM_COUNT=$(printf '%s\n' "$BODY_RAW" | grep -c '^---[[:space:]]*$' || true)
-          if [ "${DELIM_COUNT:-0}" -ge 2 ]; then
-            AGENT_TASK_TEXT=$(printf '%s\n' "$BODY_RAW" | sed '0,/^---[[:space:]]*$/d' | sed '0,/^---[[:space:]]*$/d')
-            YAML_PART=$(printf '%s\n' "$BODY_RAW" | sed -n '/^---[[:space:]]*$/,/^---[[:space:]]*$/p' | sed '1d;$d')
-          else
-            AGENT_TASK_TEXT="$BODY_RAW"
-            YAML_PART=""
-          fi
-          PR_BRANCH=""
-          BASE_BRANCH=""
-          TIMEOUT_MINS=""
-          MODEL=""
-          MERGE_INTO_UPSTREAM=""
-          if [ -n "$YAML_PART" ]; then
-            PR_BRANCH=$(echo "$YAML_PART" | yq -r '.pr_branch // ""')
-            BASE_BRANCH=$(echo "$YAML_PART" | yq -r '.base_branch // ""')
-            TIMEOUT_MINS=$(echo "$YAML_PART" | yq -r '.timeout // ""')
-            MODEL=$(echo "$YAML_PART" | yq -r '.model // ""')
-            MERGE_INTO_UPSTREAM=$(echo "$YAML_PART" | yq -r '.merge_into_upstream // ""')
-          fi
-          [ "$PR_BRANCH" = "null" ] && PR_BRANCH=""
-          [ "$BASE_BRANCH" = "null" ] && BASE_BRANCH=""
-          [ "$TIMEOUT_MINS" = "null" ] && TIMEOUT_MINS=""
-          [ "$MODEL" = "null" ] && MODEL=""
-          [ "$MERGE_INTO_UPSTREAM" = "null" ] && MERGE_INTO_UPSTREAM=""
-          # Normalize to "true" / "" — only the literal true enables upstream PR.
-          if [ "$MERGE_INTO_UPSTREAM" = "true" ]; then
-            MERGE_INTO_UPSTREAM="true"
-          else
-            MERGE_INTO_UPSTREAM=""
-          fi
-
-          TIMEOUT_SECS=$(( ${TIMEOUT_MINS:-10} * 60 ))
-          MODEL="${MODEL:-claude-haiku-4-5}"
-          AGENT_BRANCH_DEFAULT="agent/${ISSUE_NUMBER_IN}-${BRANCH_SLUG}"
-
-          : "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
-          echo "pr_branch=$PR_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "timeout_secs=$TIMEOUT_SECS" >> "$GITHUB_OUTPUT"
-          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
-          echo "agent_branch_default=$AGENT_BRANCH_DEFAULT" >> "$GITHUB_OUTPUT"
-          echo "merge_into_upstream=$MERGE_INTO_UPSTREAM" >> "$GITHUB_OUTPUT"
-          echo "agent_task_text<<EOF_AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
-          echo "EOF_AGENT_TASK_TEXT" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - id: p
+        uses: ./.github/actions/parse-issue
+        with:
+          title:        ${{ needs.fetch-issue.outputs.title }}
+          body_raw:     ${{ needs.fetch-issue.outputs.body_raw }}
+          issue_number: ${{ inputs.issue_number }}
 
   validate-runner:
     runs-on: ubuntu-latest
@@ -176,10 +126,12 @@ jobs:
           echo "existing_agent_branch=$EXISTING" >> "$GITHUB_OUTPUT"
           echo "default_branch=$DEFAULT" >> "$GITHUB_OUTPUT"
 
-  # Verified by: step_output_checks/choose_branch_output
+  # Verified by: step_output_checks/choose_branch_via_action
   choose-branch:
     needs: [parse-issue, gather-repo-facts]
     runs-on: ubuntu-latest
+    # env: retained so act-step-dispatch.sh can resolve fixture inputs. The
+    # same values are forwarded to the composite action via `with:`.
     env:
       PR_BRANCH:             ${{ needs.parse-issue.outputs.pr_branch }}
       AGENT_BRANCH_DEFAULT:  ${{ needs.parse-issue.outputs.agent_branch_default }}
@@ -190,13 +142,15 @@ jobs:
       branch:      ${{ steps.c.outputs.branch }}
       base_branch: ${{ steps.c.outputs.base_branch }}
     steps:
-      - name: choose
-        id: c
-        run: |
-          BRANCH="${PR_BRANCH:-${EXISTING_AGENT_BRANCH:-$AGENT_BRANCH_DEFAULT}}"
-          BASE="${BASE_FROM_ISSUE:-$DEFAULT_BRANCH}"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "base_branch=$BASE" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - id: c
+        uses: ./.github/actions/choose-branch
+        with:
+          pr_branch:             ${{ needs.parse-issue.outputs.pr_branch }}
+          agent_branch_default:  ${{ needs.parse-issue.outputs.agent_branch_default }}
+          existing_agent_branch: ${{ needs.gather-repo-facts.outputs.existing_agent_branch }}
+          base_from_issue:       ${{ needs.parse-issue.outputs.base_branch }}
+          default_branch:        ${{ needs.gather-repo-facts.outputs.default_branch }}
 
   # Always runs (cheap: one `docker manifest inspect` call). Its output is
   # ignored when inputs.agent_image is set — prepare-image picks the override

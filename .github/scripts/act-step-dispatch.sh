@@ -57,8 +57,24 @@ done < <(yq -j ".jobs[\"$STEP_ID\"].env // {} | to_entries[] | \"\(.key)=\(.valu
 
 RUN_BLOCKS=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.run != null) | .run" "$WF")
 if [ -z "$RUN_BLOCKS" ] || [ "$RUN_BLOCKS" = "null" ]; then
-  echo "Error: No run steps found in job '$STEP_ID'" >&2
-  exit 1
+  # Fallback: the job may delegate to a composite action via `uses:`. Follow
+  # the first local action ref (./.github/actions/<name>) and execute its
+  # script as if it were an inline run block. The job's env: (already exported
+  # above) becomes the composite action's input env, which action scripts
+  # expect per their contract.
+  ACTION_REF=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.uses != null) | .uses | select(startswith(\"./.github/actions/\"))" "$WF" | head -1)
+  if [ -n "$ACTION_REF" ] && [ "$ACTION_REF" != "null" ]; then
+    ACTION_DIR="${ACTION_REF#./}"
+    if [ -f "$ACTION_DIR/script.sh" ]; then
+      RUN_BLOCKS="bash $ACTION_DIR/script.sh"
+    else
+      echo "Error: composite action at $ACTION_DIR has no script.sh" >&2
+      exit 1
+    fi
+  else
+    echo "Error: No run steps found in job '$STEP_ID'" >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "$ARTIFACT_PATH"

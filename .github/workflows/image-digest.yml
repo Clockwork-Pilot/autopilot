@@ -36,11 +36,14 @@ jobs:
           compact=$(echo "$manifest" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)))')
           echo "manifest_json=$compact" >> "$GITHUB_OUTPUT"
 
-  # Verified by: step_output_checks/parse_digest_cases
+  # Verified by: step_output_checks/parse_digest_via_action
   parse-digest:
     name: parse-digest
     needs: [fetch-manifest]
     runs-on: ubuntu-latest
+    # env: retained so act-step-dispatch.sh can resolve fixture inputs against
+    # the expression keys here. Values are forwarded to the composite action
+    # via `with:` below.
     env:
       MANIFEST_JSON: ${{ needs.fetch-manifest.outputs.manifest_json }}
       IMAGE_REPO:    ${{ inputs.image_repo }}
@@ -48,21 +51,9 @@ jobs:
       digest: ${{ steps.p.outputs.digest }}
       image:  ${{ steps.p.outputs.image }}
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - id: p
-        run: |
-          echo "$MANIFEST_JSON" | python3 -c '
-          import json, os, sys
-          m = json.load(sys.stdin)
-          if m.get("manifests"):
-              digest = m["manifests"][0].get("digest", "")
-          elif "config" in m:
-              digest = m["config"].get("digest", "")
-          else:
-              print("ERROR: no digest found in manifest", file=sys.stderr); sys.exit(1)
-          if not digest:
-              print("ERROR: digest is empty", file=sys.stderr); sys.exit(1)
-          image_repo = os.environ["IMAGE_REPO"]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"digest={digest}\n")
-              f.write(f"image={image_repo}@{digest}\n")
-          '
+        uses: ./.github/actions/parse-digest
+        with:
+          manifest_json: ${{ needs.fetch-manifest.outputs.manifest_json }}
+          image_repo:    ${{ inputs.image_repo }}

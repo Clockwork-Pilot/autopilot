@@ -1,0 +1,27 @@
+name: parse-issue
+description: Parse issue title/body (with optional YAML frontmatter) into structured agent-run inputs.
+
+inputs:
+  title:        { required: true,  description: Issue title. }
+  body_raw:     { required: true,  description: Issue body (may contain YAML frontmatter). }
+  issue_number: { required: true,  description: Issue number, used for default branch name. }
+
+outputs:
+  agent_task_text:      { description: Body text with frontmatter stripped., value: "${{ steps.p.outputs.agent_task_text }}" }
+  pr_branch:            { description: Override branch from frontmatter (or empty).,   value: "${{ steps.p.outputs.pr_branch }}" }
+  base_branch:          { description: Base branch from frontmatter (or empty).,        value: "${{ steps.p.outputs.base_branch }}" }
+  timeout_secs:         { description: Timeout in seconds., value: "${{ steps.p.outputs.timeout_secs }}" }
+  model:                { description: Model id.,           value: "${{ steps.p.outputs.model }}" }
+  agent_branch_default: { description: Default agent branch if no override., value: "${{ steps.p.outputs.agent_branch_default }}" }
+  merge_into_upstream:  { description: "true" or empty.,    value: "${{ steps.p.outputs.merge_into_upstream }}" }
+
+runs:
+  using: composite
+  steps:
+    - id: p
+      shell: bash
+      env:
+        TITLE:        ${{ inputs.title }}
+        BODY_RAW:     ${{ inputs.body_raw }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+      run: bash "$GITHUB_ACTION_PATH/script.sh"

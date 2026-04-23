@@ -104,22 +104,22 @@
         "coding_agent_steps"
       ],
       "constraints": {
-        "parse_issue_cases": {
-          "id": "parse_issue_cases",
-          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh coding-agent.yml parse-issue",
-          "description": "Behavioral: runs every fixture under fixtures/parse-issue/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+        "parse_issue_via_action": {
+          "id": "parse_issue_via_action",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh act-step-runner.yml parse-issue",
+          "description": "Behavioral: parse-issue fixtures pass against the act-step-runner.yml wrapper which invokes .github/actions/parse-issue/script.sh. Replaces parse_issue_cases after refactor to composite action.",
           "fails_count": 1
         },
-        "choose_branch_cases": {
-          "id": "choose_branch_cases",
-          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh coding-agent.yml choose-branch",
-          "description": "Behavioral: runs every fixture under fixtures/choose-branch/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+        "choose_branch_via_action": {
+          "id": "choose_branch_via_action",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh act-step-runner.yml choose-branch",
+          "description": "Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.",
           "fails_count": 1
         },
-        "parse_digest_cases": {
-          "id": "parse_digest_cases",
-          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh image-digest.yml parse-digest",
-          "description": "Behavioral: runs every fixture under fixtures/parse-digest/<case>/ and diffs the parse-digest job's emitted $GITHUB_OUTPUT. Adding a case is a folder drop \u2014 no spec edit needed.",
+        "parse_digest_via_action": {
+          "id": "parse_digest_via_action",
+          "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh act-step-runner.yml parse-digest",
+          "description": "Behavioral: parse-digest fixtures pass against the act-step-runner.yml wrapper. Replaces parse_digest_cases.",
           "fails_count": 1
         }
       }

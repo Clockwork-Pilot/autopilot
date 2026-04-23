@@ -17,9 +17,9 @@ Workflow structure constraints for .github/workflows
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
-      - [choose_branch_cases](#choose_branch_cases)
-      - [parse_digest_cases](#parse_digest_cases)
-      - [parse_issue_cases](#parse_issue_cases)
+      - [choose_branch_via_action](#choose_branch_via_action)
+      - [parse_digest_via_action](#parse_digest_via_action)
+      - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
       - [open_upstream_pr_job_shape](#open_upstream_pr_job_shape)
       - [run_agent_is_self_hosted](#run_agent_is_self_hosted)
@@ -68,14 +68,14 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - One behavioral constraint per dispatchable step, using mktemp -d for isolation
 
-#### choose_branch_cases
-**Description:** Behavioral: runs every fixture under fixtures/choose-branch/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop — no spec edit needed.
+#### choose_branch_via_action
+**Description:** Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.
 
-#### parse_digest_cases
-**Description:** Behavioral: runs every fixture under fixtures/parse-digest/<case>/ and diffs the parse-digest job's emitted $GITHUB_OUTPUT. Adding a case is a folder drop — no spec edit needed.
+#### parse_digest_via_action
+**Description:** Behavioral: parse-digest fixtures pass against the act-step-runner.yml wrapper. Replaces parse_digest_cases.
 
-#### parse_issue_cases
-**Description:** Behavioral: runs every fixture under fixtures/parse-issue/<case>/ and diffs emitted $GITHUB_OUTPUT. Adding a case is a folder drop — no spec edit needed.
+#### parse_issue_via_action
+**Description:** Behavioral: parse-issue fixtures pass against the act-step-runner.yml wrapper which invokes .github/actions/parse-issue/script.sh. Replaces parse_issue_cases after refactor to composite action.
 
 ### Feature: upstream_pr_isolation
 **Cross-repo PR creation is isolated from the self-hosted agent runner**
