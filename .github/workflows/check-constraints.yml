@@ -12,6 +12,7 @@ jobs:
     uses: ./.github/workflows/image-digest.yml
 
   check-constraints:
+    name: check-constraints
     needs: [image-digest]
     runs-on: ubuntu-latest
 
