@@ -51,13 +51,18 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       env:
         AGENT_IMAGE: ${{ steps.digest.outputs.image }}
+        IMAGE_REPO: ${{ inputs.image_repo }}
       run: |
         docker pull "$AGENT_IMAGE"
-        docker save "$AGENT_IMAGE" > /tmp/autopilot-ws.tar
+        # Tag before save: docker save on a digest-only reference loses the
+        # name on load, leaving a dangling image ID that docker run can't
+        # resolve by @sha256. Tagging gives the tar a stable local ref.
+        docker tag "$AGENT_IMAGE" "$IMAGE_REPO:cached"
+        docker save "$IMAGE_REPO:cached" > /tmp/autopilot-ws.tar
 
     - id: run
       shell: bash
       env:
-        AGENT_IMAGE: ${{ steps.digest.outputs.image }}
+        AGENT_IMAGE: ${{ inputs.image_repo }}:cached
         CMD: ${{ inputs.command }}
       run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"
