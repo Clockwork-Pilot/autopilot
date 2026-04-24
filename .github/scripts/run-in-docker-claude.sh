@@ -29,6 +29,13 @@ RUN=(timeout "$TIMEOUT_SECS" docker run --rm
   -e DISABLE_STOP_HOOK=
   -e MODEL
   -e PROMPT
+  # Match the host runner's UID/GID so the entrypoint chowns the
+  # bind-mounted workspace and docker-files dirs to the same UID that
+  # already owns them on the host, and gosu-drops the process there.
+  # Avoids host file-ownership mutation that would break post-job
+  # git cleanup and other host-side steps.
+  -e "HOST_UID=$(id -u)"
+  -e "HOST_GID=$(id -g)"
   -v "$DOCKER_FILES/.cargo:/home/node/.cargo:Z"
   -v "$DOCKER_FILES/.credentials:/home/node/.claude:Z"
   -v "$DOCKER_FILES/.claude.local.json:/home/node/.claude.json:Z"

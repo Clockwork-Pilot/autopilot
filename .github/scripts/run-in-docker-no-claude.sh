@@ -14,7 +14,15 @@ set -uo pipefail
 CMD="${1:?bash command string required}"
 
 if command -v docker >/dev/null 2>&1; then
+  # Tell the image's entrypoint to chown the workspace + gosu-drop to
+  # the host runner's UID/GID. Without this the entrypoint would chown
+  # /workspace to UID 1000, mutating host file ownership via the bind
+  # mount and breaking subsequent host-side post-steps (actions/checkout
+  # cleanup, cache restores, artifact uploads — all fail with EPERM on
+  # locking .git/config and friends).
   docker run --rm \
+    -e "HOST_UID=$(id -u)" \
+    -e "HOST_GID=$(id -g)" \
     -v "$GITHUB_WORKSPACE:/workspace" \
     "$AGENT_IMAGE" \
     bash -c "source /docker-scripts/user-entrypoint.sh; $CMD"
