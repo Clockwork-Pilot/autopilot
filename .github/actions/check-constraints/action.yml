@@ -44,7 +44,21 @@ runs:
     - id: load
       shell: bash
       if: steps.cache.outputs.cache-hit == 'true'
-      run: docker load < /tmp/autopilot-ws.tar
+      env:
+        IMAGE_REPO: ${{ inputs.image_repo }}
+      run: |
+        out=$(docker load < /tmp/autopilot-ws.tar)
+        echo "$out"
+        # Re-tag to :cached regardless of whether the tar carried a tag
+        # (newer saves) or only an image ID (older saves from a digest-only
+        # ref). Without this, a dangling load leaves docker run unable to
+        # resolve the image locally and it falls back to pulling.
+        src=$(printf '%s\n' "$out" | sed -n -e 's/^Loaded image: //p' -e 's/^Loaded image ID: //p' | head -n1)
+        if [ -z "$src" ]; then
+          echo "docker load produced no recognizable output" >&2
+          exit 1
+        fi
+        docker tag "$src" "$IMAGE_REPO:cached"
 
     - id: pull
       shell: bash
