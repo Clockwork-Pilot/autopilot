@@ -23,8 +23,9 @@ Workflow structure constraints for .github/workflows
       - [upstream_environment_scoped_to_one_job](#upstream_environment_scoped_to_one_job)
       - [upstream_pr_token_scoped_to_one_job](#upstream_pr_token_scoped_to_one_job)
     - [Feature: workflow_hygiene](#feature-workflow_hygiene)
-      - [checkout_pinned_to_approved_sha](#checkout_pinned_to_approved_sha)
+      - [checkout_pinned_via_env](#checkout_pinned_via_env)
       - [no_checkout_v4_in_workflows](#no_checkout_v4_in_workflows)
+      - [no_hardcoded_base_image](#no_hardcoded_base_image)
 
 ## Features
 
@@ -89,8 +90,11 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - All action references must be pinned to full commit SHAs for reproducibility and security
 
-#### checkout_pinned_to_approved_sha
-**Description:** Security: actions/checkout@v6 must be pinned to exactly de0fac2e4500dabe0009e67214ff5f5447ce83dd
+#### checkout_pinned_via_env
+**Description:** Security: every actions/checkout reference in workflows must match $CHECKOUT_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved checkout pin; update there to rotate.
 
 #### no_checkout_v4_in_workflows
 **Description:** Negative: no .github/workflows/*.yml file may reference actions/checkout@v4
+
+#### no_hardcoded_base_image
+**Description:** Architectural: the autopilot-ws image reference must not appear in any workflow yml file — not as a default, not in a comment, not anywhere. The image must be supplied purely via a workflow/action input (base_image) by the consumer caller, so autopilot itself has no built-in coupling to any specific ghcr/registry ref.

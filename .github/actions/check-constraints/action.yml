@@ -3,7 +3,7 @@ description: Run check_spec_constraints.py inside a prepared docker image. Image
 
 inputs:
   image:
-    description: Local docker image ref produced by ensure-docker-image (or equivalent). The image must be an autopilot-ws-compatible runtime.
+    description: Local docker image ref produced by ensure-docker-image (or equivalent). Must be an autopilot-ws-compatible runtime.
     required: true
   command:
     description: Command to run inside the image. Default runs the constraint checker.
@@ -13,15 +13,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Alias image to the tag run-in-docker-no-claude.sh expects
-      shell: bash
-      env:
-        IMAGE: ${{ inputs.image }}
-      run: docker tag "$IMAGE" ghcr.io/clockwork-pilot/autopilot-ws:cached
-
     - name: Run check inside image
       shell: bash
       env:
-        AGENT_IMAGE: ghcr.io/clockwork-pilot/autopilot-ws:cached
+        AGENT_IMAGE: ${{ inputs.image }}
         CMD: ${{ inputs.command }}
       run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"

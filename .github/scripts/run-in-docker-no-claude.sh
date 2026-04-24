@@ -3,14 +3,14 @@
 # workspace mounted. No claude credentials, caches, or claude-specific env —
 # for callers that just need the toolchain image (e.g. constraint checks).
 #
-# Env (optional, with local-friendly defaults):
+# Env:
+#   AGENT_IMAGE      — required. Autopilot-ws-compatible image ref to run in.
 #   GITHUB_WORKSPACE — defaults to $PWD so the script is usable outside CI.
-#   AGENT_IMAGE      — defaults to ghcr.io/clockwork-pilot/autopilot-ws:latest.
 # Usage: run-in-docker-no-claude.sh <bash command string>
 set -uo pipefail
 
 : "${GITHUB_WORKSPACE:=$PWD}"
-: "${AGENT_IMAGE:=ghcr.io/clockwork-pilot/autopilot-ws:latest}"
+: "${AGENT_IMAGE:?AGENT_IMAGE must be set to an autopilot-ws-compatible image ref}"
 CMD="${1:?bash command string required}"
 
 if command -v docker >/dev/null 2>&1; then

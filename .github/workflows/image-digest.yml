@@ -5,8 +5,7 @@ on:
     inputs:
       image_repo:
         description: Registry repo (e.g. ghcr.io/org/name), no tag.
-        required: false
-        default: ghcr.io/clockwork-pilot/autopilot-ws
+        required: true
         type: string
     outputs:
       digest:

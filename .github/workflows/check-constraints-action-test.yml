@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       image_repo:
-        description: Override image_repo for test runs.
-        required: false
-        default: ghcr.io/clockwork-pilot/autopilot-ws
+        description: image_repo for test runs. Caller must supply — no built-in default.
+        required: true
       command:
         description: Override command.
         required: false

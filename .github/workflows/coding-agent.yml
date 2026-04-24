@@ -15,6 +15,15 @@ on:
         description: Issue number to work on
         required: true
         type: string
+      base_image:
+        description: |
+          Autopilot-ws-compatible runtime image (USER node, tools on PATH). Used
+          by the internal image-digest job to resolve a digest-pinned ref, and
+          as the build FROM contract when a Dockerfile is supplied. Required —
+          consumers supply this so autopilot has no built-in coupling to any
+          specific registry ref. Not used when `docker_image` is set.
+        required: true
+        type: string
       docker_image:
         description: |
           Pre-built local docker tag to use as-is. When set, prepare-image skips
@@ -29,9 +38,9 @@ on:
         default: ""
       agent_image:
         description: |
-          Override base image (fallback path, used when docker_image is unset).
-          Accepts any ref docker can pull (tag or digest). If unset, resolves the
-          latest digest of ghcr.io/clockwork-pilot/autopilot-ws.
+          Override base image with a specific tag or digest (fallback path, used
+          when docker_image is unset). If unset, resolves the latest digest of
+          `base_image` via the image-digest job.
         required: false
         type: string
         default: ""
@@ -185,6 +194,8 @@ jobs:
   # on the default success() gate instead of custom skip-tolerant conditions.
   image-digest:
     uses: Clockwork-Pilot/autopilot/.github/workflows/image-digest.yml@main
+    with:
+      image_repo: ${{ inputs.base_image }}
 
   # Resolves the image for run-agent. Two modes:
   #   - docker_image set → short-circuit, echo it back (consumer pre-built via
@@ -278,10 +289,9 @@ jobs:
           [ -s "$DOCKER_FILES/.claude.local.json" ] || printf '{}\n' > "$DOCKER_FILES/.claude.local.json"
 
       # Image is either (a) locally built by prepare-image, or (b) a registry
-      # ref. docker run will pull (b) lazily; (a) is already present. No login
-      # needed for the default ghcr.io/clockwork-pilot/autopilot-ws (public).
-      # If a user's custom agent_image is private, they must configure a docker
-      # login step earlier in their own caller workflow.
+      # ref. docker run will pull (b) lazily; (a) is already present. If the
+      # consumer's base_image/agent_image is private, they must configure a
+      # docker login step earlier in their own caller workflow.
 
       - name: Run Claude agent in Docker
         id: agent

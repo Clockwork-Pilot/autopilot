@@ -174,6 +174,21 @@ jobs:
 
 See `autopilot-selftest` for both shapes dogfooded against this repo.
 
+### Overriding the base image
+
+Both reusable workflows accept a `base_image:` input (default `ghcr.io/clockwork-pilot/autopilot-ws:latest`). Set it when you want to point at a fork, a private mirror, or a pinned digest:
+
+```yaml
+uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
+with:
+  base_image:       ghcr.io/your-org/autopilot-ws-mirror:v1.2.3
+  dockerfile:       Dockerfile.agent
+  cache_key_prefix: ${{ github.repository }}-agent-img
+  ...
+```
+
+`base_image` is used both as the FROM contract when a Dockerfile is supplied, and as the image that gets pulled when no Dockerfile is supplied. The only built-in reference to `ghcr.io/clockwork-pilot/autopilot-ws` lives in this input's default — change it once per caller and the whole pipeline follows.
+
 ### Properties
 
 - **Runs as root** at image-build time — `apt-get`, `pip install` system-wide, `/usr/local/bin` writes all work.

@@ -14,16 +14,22 @@
         "All action references must be pinned to full commit SHAs for reproducibility and security"
       ],
       "constraints": {
-        "checkout_pinned_to_approved_sha": {
-          "id": "checkout_pinned_to_approved_sha",
-          "cmd": "for f in $PROJECT_ROOT/.github/workflows/*.yml; do yq '[.jobs[].steps[]? | .uses? | select(. != null) | select(test(\"actions/checkout@\")) | select(. != \"actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\")] | length' \"$f\" | grep -q '^0$' || { echo \"Non-approved checkout SHA in $f\"; exit 1; }; done",
-          "description": "Security: actions/checkout@v6 must be pinned to exactly de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-          "fails_count": 1
-        },
         "no_checkout_v4_in_workflows": {
           "id": "no_checkout_v4_in_workflows",
           "cmd": "! grep -rn \"actions/checkout@v4\" \"$PROJECT_ROOT/.github/workflows/\" --include=\"*.yml\"",
           "description": "Negative: no .github/workflows/*.yml file may reference actions/checkout@v4",
+          "fails_count": 1
+        },
+        "checkout_pinned_via_env": {
+          "id": "checkout_pinned_via_env",
+          "cmd": "for f in $PROJECT_ROOT/.github/workflows/*.yml; do yq --arg v \"$CHECKOUT_VER\" '[.jobs[].steps[]? | .uses? | select(. != null) | select(test(\"actions/checkout@\")) | select(. != $v)] | length' \"$f\" | grep -q '^0$' || { echo \"Non-approved checkout ref in $f (expected $CHECKOUT_VER)\"; exit 1; }; done",
+          "description": "Security: every actions/checkout reference in workflows must match $CHECKOUT_VER (defined in project.k.json \u2192 specs.autopilot.envs). Single source of truth for the approved checkout pin; update there to rotate.",
+          "fails_count": 1
+        },
+        "no_hardcoded_base_image": {
+          "id": "no_hardcoded_base_image",
+          "cmd": "! grep -rE 'ghcr\\.io/clockwork-pilot/autopilot-ws' $PROJECT_ROOT/.github/workflows/ --include='*.yml'",
+          "description": "Architectural: the autopilot-ws image reference must not appear in any workflow yml file \u2014 not as a default, not in a comment, not anywhere. The image must be supplied purely via a workflow/action input (base_image) by the consumer caller, so autopilot itself has no built-in coupling to any specific ghcr/registry ref.",
           "fails_count": 1
         }
       }

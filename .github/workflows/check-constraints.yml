@@ -16,12 +16,19 @@ on:
         required: false
         type: string
         default: ""
+      base_image:
+        description: |
+          Autopilot-ws-compatible runtime image the check runs against.
+          Pulled + tagged when `dockerfile` is unset; used as FROM contract
+          when set. Consumer caller supplies this — autopilot carries no
+          built-in registry ref.
+        required: true
+        type: string
       dockerfile:
         description: |
           Optional Dockerfile path. When unset, the check runs against
-          ghcr.io/clockwork-pilot/autopilot-ws as-is. When set, a derived
-          image is built and used instead. The Dockerfile must FROM an
-          autopilot-ws-compatible base.
+          `base_image` as-is. When set, a derived image is built from
+          `base_image` and the check runs against that.
         required: false
         type: string
         default: ""
@@ -51,7 +58,7 @@ jobs:
         with:
           dockerfile:       ${{ inputs.dockerfile }}
           build_args:       ${{ inputs.build_args }}
-          base_image:       ghcr.io/clockwork-pilot/autopilot-ws:latest
+          base_image:       ${{ inputs.base_image }}
           tag:              autopilot-check
           cache_key_prefix: ${{ inputs.cache_key_prefix }}
 
