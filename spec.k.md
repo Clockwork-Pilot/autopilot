@@ -23,6 +23,7 @@ Workflow structure constraints for .github/workflows
       - [upstream_environment_scoped_to_one_job](#upstream_environment_scoped_to_one_job)
       - [upstream_pr_token_scoped_to_one_job](#upstream_pr_token_scoped_to_one_job)
     - [Feature: workflow_hygiene](#feature-workflow_hygiene)
+      - [actionlint_passes](#actionlint_passes)
       - [checkout_pinned_via_env](#checkout_pinned_via_env)
       - [no_checkout_v4_in_workflows](#no_checkout_v4_in_workflows)
       - [no_hardcoded_base_image](#no_hardcoded_base_image)
@@ -89,6 +90,9 @@ Workflow structure constraints for .github/workflows
 
 **Goals:**
 - All action references must be pinned to full commit SHAs for reproducibility and security
+
+#### actionlint_passes
+**Description:** Static: actionlint (https://github.com/rhysd/actionlint) must report zero issues across all .github/workflows/*.yml files. Catches typos in ${{ needs.<job> }} references, mismatched composite action inputs, invalid context usage, and other structural issues that yq-only checks miss.
 
 #### checkout_pinned_via_env
 **Description:** Security: every actions/checkout reference in workflows must match $CHECKOUT_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved checkout pin; update there to rotate.

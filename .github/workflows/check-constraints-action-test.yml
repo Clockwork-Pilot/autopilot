@@ -6,8 +6,8 @@ name: Check Constraints Action Test
 on:
   workflow_dispatch:
     inputs:
-      image_repo:
-        description: image_repo for test runs. Caller must supply — no built-in default.
+      image:
+        description: Local docker image ref for test runs. Caller must supply — no built-in default.
         required: true
       command:
         description: Override command.
@@ -21,5 +21,5 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: ./.github/actions/check-constraints
         with:
-          image_repo: ${{ inputs.image_repo }}
+          image:      ${{ inputs.image }}
           command:    ${{ inputs.command }}

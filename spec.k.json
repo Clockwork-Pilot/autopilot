@@ -31,6 +31,12 @@
           "cmd": "! grep -rE 'ghcr\\.io/clockwork-pilot/autopilot-ws' $PROJECT_ROOT/.github/workflows/ --include='*.yml'",
           "description": "Architectural: the autopilot-ws image reference must not appear in any workflow yml file \u2014 not as a default, not in a comment, not anywhere. The image must be supplied purely via a workflow/action input (base_image) by the consumer caller, so autopilot itself has no built-in coupling to any specific ghcr/registry ref.",
           "fails_count": 1
+        },
+        "actionlint_passes": {
+          "id": "actionlint_passes",
+          "cmd": "cd $PROJECT_ROOT && actionlint .github/workflows/*.yml",
+          "description": "Static: actionlint (https://github.com/rhysd/actionlint) must report zero issues across all .github/workflows/*.yml files. Catches typos in ${{ needs.<job> }} references, mismatched composite action inputs, invalid context usage, and other structural issues that yq-only checks miss.",
+          "fails_count": 1
         }
       }
     },

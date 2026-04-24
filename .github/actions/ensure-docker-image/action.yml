@@ -45,7 +45,8 @@ inputs:
   cache_key_prefix:
     description: |
       REQUIRED. Namespace for the cache and the local docker tag.
-      Use a project-specific value (e.g. `${{ github.repository }}-img`).
+      Use a project-specific value (e.g. `<org>/<repo>-img`, typically
+      derived from github.repository at the call site).
       Distinct projects MUST use distinct prefixes to avoid cross-project cache
       interference on shared cache scopes and to keep self-hosted docker tags
       disambiguated. There is no default: omitting this is a usage error.
@@ -56,7 +57,7 @@ outputs:
     description: Fully qualified local tag of the produced image. Ready to `docker run`.
     value: ${{ steps.finalize.outputs.image }}
   cache_hit:
-    description: "true" if the local tag pre-existed and neither build nor pull ran; "false" otherwise.
+    description: '"true" if the local tag pre-existed and neither build nor pull ran; "false" otherwise.'
     value: ${{ steps.finalize.outputs.cache_hit }}
   digest:
     description: Local image ID (sha256) of the produced image.

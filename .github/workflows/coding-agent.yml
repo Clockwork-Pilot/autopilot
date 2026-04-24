@@ -62,7 +62,7 @@ on:
           Namespace for the image cache when prepare-image builds internally.
           Required when `docker_image` is unset; ignored when `docker_image` is set.
           See .github/actions/ensure-docker-image/README.md for guidelines.
-          Use e.g. `${{ github.repository }}-agent-img`.
+          Use e.g. `<owner>/<repo>-agent-img` (i.e. github.repository + a suffix).
         required: false
         type: string
         default: ""

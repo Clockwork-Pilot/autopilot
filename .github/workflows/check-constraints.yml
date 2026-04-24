@@ -41,7 +41,7 @@ on:
         description: |
           REQUIRED. Namespace for the image cache. See
           .github/actions/ensure-docker-image/README.md for guidelines.
-          Use e.g. `${{ github.repository }}-check-img`.
+          Use e.g. `<owner>/<repo>-check-img` (i.e. github.repository + a suffix).
         required: true
         type: string
 

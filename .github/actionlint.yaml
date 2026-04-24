@@ -1,0 +1,9 @@
+paths:
+  .github/workflows/act-step-runner.yml:
+    # Test harness: `needs.<job>.outputs.*` and extra `inputs.*` references are
+    # fixture placeholders interpolated by `act` at dispatch time, not real job
+    # dependencies or declared workflow_call inputs. See the comment block at
+    # the top of the `# Composite-action test wrappers` section.
+    ignore:
+      - 'property "(fetch-issue|parse-issue|gather-repo-facts|fetch-manifest)" is not defined'
+      - 'property "(issue_number|image_repo)" is not defined in object type'
