@@ -10,10 +10,6 @@ Workflow structure constraints for .github/workflows
 - [Features](#features)
     - [Feature: coding_agent_steps](#feature-coding_agent_steps)
       - [dispatcher_fails_on_missing_step](#dispatcher_fails_on_missing_step)
-      - [fetch_issue_job_shape](#fetch_issue_job_shape)
-      - [parse_issue_consumes_fetch_issue](#parse_issue_consumes_fetch_issue)
-      - [run_agent_consumes_image_digest](#run_agent_consumes_image_digest)
-      - [run_agent_consumes_parse_issue](#run_agent_consumes_parse_issue)
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
@@ -40,18 +36,6 @@ Workflow structure constraints for .github/workflows
 
 #### dispatcher_fails_on_missing_step
 **Description:** Negative: act-step-dispatch.sh must exit non-zero AND emit the missing-step error to stderr (not stdout) when the requested step does not exist
-
-#### fetch_issue_job_shape
-**Description:** Structural: fetch-issue job must exist with title and body_raw job-level outputs, and its run block must call gh api (it is the network-bound fetcher that feeds parse-issue).
-
-#### parse_issue_consumes_fetch_issue
-**Description:** Structural: parse-issue must declare needs: fetch-issue AND wire job-level env TITLE/BODY_RAW from needs.fetch-issue.outputs.* and ISSUE_NUMBER from inputs.issue_number. Env keys use natural names (no INPUT_ prefix) since the dispatcher resolves env expressions directly.
-
-#### run_agent_consumes_image_digest
-**Description:** Structural: run-agent must depend on image-digest; image-digest must be a job that calls the reusable workflow ./.github/workflows/image-digest.yml; legacy composite action .github/actions/image-digest must be gone; no references to steps.image-digest.outputs.* may remain (migrated to needs.image-digest.outputs.*); get-image-digest.sh and docker-cache.sh must be deleted.
-
-#### run_agent_consumes_parse_issue
-**Description:** Structural: run-agent must depend on parse-issue; the legacy slug job must be gone; get-issue-details.sh must be deleted; no references to steps.issue.outputs.* may remain. Enforces the cutover to parse-issue as single source of parsed issue data.
 
 ### Feature: docker_environment
 **Constraint checks must run inside Docker container**

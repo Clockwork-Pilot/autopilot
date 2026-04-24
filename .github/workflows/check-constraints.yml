@@ -13,4 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - uses: ./.github/actions/check-constraints
+      # Reference the action by repo-qualified ref: inside a reusable workflow
+      # `./` resolves against the CALLER's checkout, not the workflow's home
+      # repo, so `uses: ./.github/actions/...` would fail in consumer runs.
+      - uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@main
