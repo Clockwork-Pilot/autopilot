@@ -53,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - id: p
-        uses: ./.github/actions/parse-digest
+        uses: Clockwork-Pilot/autopilot/.github/actions/parse-digest@main
         with:
           manifest_json: ${{ needs.fetch-manifest.outputs.manifest_json }}
           image_repo:    ${{ inputs.image_repo }}

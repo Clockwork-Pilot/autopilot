@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - id: p
-        uses: ./.github/actions/parse-issue
+        uses: Clockwork-Pilot/autopilot/.github/actions/parse-issue@main
         with:
           title:        ${{ needs.fetch-issue.outputs.title }}
           body_raw:     ${{ needs.fetch-issue.outputs.body_raw }}
@@ -144,7 +144,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - id: c
-        uses: ./.github/actions/choose-branch
+        uses: Clockwork-Pilot/autopilot/.github/actions/choose-branch@main
         with:
           pr_branch:             ${{ needs.parse-issue.outputs.pr_branch }}
           agent_branch_default:  ${{ needs.parse-issue.outputs.agent_branch_default }}
@@ -157,7 +157,7 @@ jobs:
   # in that case. Keeping it unconditional means every downstream job can rely
   # on the default success() gate instead of custom skip-tolerant conditions.
   image-digest:
-    uses: ./.github/workflows/image-digest.yml
+    uses: Clockwork-Pilot/autopilot/.github/workflows/image-digest.yml@main
 
   # Picks the base image (user override or resolved digest) and, if
   # image_setup_script is set, builds a thin derived image on the runner
@@ -366,7 +366,7 @@ jobs:
 
       - name: Open PR inside fork
         if: needs.run-agent.outputs.has_new_commit == 'true' && needs.parse-issue.outputs.merge_into_upstream != 'true'
-        uses: ./.github/actions/create-pr
+        uses: Clockwork-Pilot/autopilot/.github/actions/create-pr@main
         with:
           gh-token:    ${{ secrets.GITHUB_TOKEN }}
           pr-repo:     ${{ github.repository }}
@@ -376,7 +376,7 @@ jobs:
           commit-body: ${{ needs.run-agent.outputs.commit_msg }}
 
       - name: Comment agent result on issue
-        uses: ./.github/actions/comment-agent-result
+        uses: Clockwork-Pilot/autopilot/.github/actions/comment-agent-result@main
         with:
           gh-token:        ${{ secrets.GITHUB_TOKEN }}
           repo:            ${{ github.repository }}
@@ -422,7 +422,7 @@ jobs:
           : "${UPSTREAM_PR_TOKEN:?UPSTREAM_PR_TOKEN is not set in the 'upstream-pr' environment — see autopilot-ws/README.md 'Opening PRs against the upstream repo (optional)'}"
 
       - name: Open PR against upstream
-        uses: ./.github/actions/create-pr
+        uses: Clockwork-Pilot/autopilot/.github/actions/create-pr@main
         with:
           gh-token:    ${{ secrets.UPSTREAM_PR_TOKEN }}
           pr-repo:     ${{ steps.upstream.outputs.full_name }}
@@ -432,7 +432,7 @@ jobs:
           commit-body: ${{ needs.run-agent.outputs.commit_msg }}
 
       - name: Comment agent result on issue
-        uses: ./.github/actions/comment-agent-result
+        uses: Clockwork-Pilot/autopilot/.github/actions/comment-agent-result@main
         with:
           gh-token:        ${{ secrets.GITHUB_TOKEN }}
           repo:            ${{ github.repository }}

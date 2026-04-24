@@ -28,7 +28,9 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - id: digest
-      uses: ./.github/actions/parse-digest
+      # Repo-qualified: inside a composite action invoked cross-repo,
+      # `./` resolves against the caller's checkout, not this repo.
+      uses: Clockwork-Pilot/autopilot/.github/actions/parse-digest@main
       with:
         manifest_json: ${{ steps.fetch.outputs.manifest_json }}
         image_repo:    ${{ inputs.image_repo }}
