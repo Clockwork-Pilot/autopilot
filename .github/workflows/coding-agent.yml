@@ -284,8 +284,11 @@ jobs:
         run: |
           # stdout → issue comment; exit code gates the commit step.
           set +e
+          # Re-display the constraint report the in-container agent already
+          # produced (spec-checks.k.json on disk). --dry-run loads that file
+          # and prints the report without re-running any constraint `cmd`.
           bash .github/scripts/run-in-docker-no-claude.sh \
-            'check_spec_constraints.py --dry-run' \
+            '$PLUGIN_ROOT/bin/check --dry-run --full-report' \
             > /tmp/constraints.md 2>&1
           EXIT_CODE=$?
           set -e
