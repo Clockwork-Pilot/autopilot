@@ -147,7 +147,7 @@ jobs:
       runner_label:     ${{ github.actor }}
       issue_number:     ${{ github.event.issue.number }}
       dockerfile:       Dockerfile.agent
-      cache_key_prefix: ${{ github.repository }}-agent-img
+      tag_prefix:       ${{ github.repository }}-agent-img
 ```
 
 **Hoisted (visible image job):** call `ensure-docker-image.yml` first, hand its output to `coding-agent.yml` via `docker_image:`. Preferred when you want the image-prep cache hit/miss visible at the caller level, or when you want to insert consumer-owned steps around it. Both jobs must land on the same self-hosted runner (single runner per `runner_label` — the default single-user setup).
@@ -161,7 +161,7 @@ jobs:
       base_image:       ghcr.io/clockwork-pilot/autopilot-ws:latest
       dockerfile:       Dockerfile.agent
       tag:              autopilot-agent
-      cache_key_prefix: ${{ github.repository }}-agent-img
+      tag_prefix:       ${{ github.repository }}-agent-img
 
   agent:
     needs: image
@@ -183,7 +183,7 @@ uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
 with:
   base_image:       ghcr.io/your-org/autopilot-ws-mirror:v1.2.3
   dockerfile:       Dockerfile.agent
-  cache_key_prefix: ${{ github.repository }}-agent-img
+  tag_prefix:       ${{ github.repository }}-agent-img
   ...
 ```
 
@@ -194,10 +194,10 @@ with:
 - **Runs as root** at image-build time — `apt-get`, `pip install` system-wide, `/usr/local/bin` writes all work.
 - **Build context** is the caller's checkout, so `COPY` from `pyproject.toml` / `package.json` works if you need dep manifests at build time.
 - **Caching** is unified:
-  - GitHub-hosted: Buildx GHA layer cache (`type=gha`), scoped by `cache_key_prefix`.
+  - GitHub-hosted: Buildx GHA layer cache (`type=gha`), scoped by `tag_prefix` (dual-purpose: tag partition on self-hosted, cache scope on hosted).
   - Self-hosted: docker daemon's local layer cache (persistent).
   - Fast-path: if the content-hashed local tag already exists, build is skipped entirely.
-- **No registry required** in either shape — images live as local docker tags on the self-hosted runner. See [`ensure-docker-image/README.md`](.github/actions/ensure-docker-image/README.md) for cache-key guidelines.
+- **No registry required** in either shape — images live as local docker tags on the self-hosted runner. See [`ensure-docker-image/README.md`](.github/actions/ensure-docker-image/README.md) for tag-prefix guidelines.
 
 ### When to publish to a registry instead
 

@@ -10,7 +10,7 @@ description: |
     - dockerfile set    → builds the Dockerfile on top of `base_image`, outputs the built tag.
 
   Caching:
-    - GitHub-hosted build path → Buildx GHA cache (type=gha), scoped by cache_key_prefix.
+    - GitHub-hosted build path → Buildx GHA cache (type=gha), scoped by tag_prefix.
     - GitHub-hosted pull path  → actions/cache over a docker save tarball, keyed by base digest.
     - Self-hosted (both paths) → docker daemon's persistent local layer cache (no external layer).
     - Fast path: when a local tag with the computed content hash already exists, build/pull is skipped entirely.
@@ -39,17 +39,24 @@ inputs:
       path and the cache-key stability.
     required: true
   tag:
-    description: Local tag base. A `<prefix>-<hash>` suffix is appended, producing `<tag>:<prefix>-<hash>`.
+    description: Local tag base. A `<tag_prefix>-<hash>` suffix is appended, producing `<tag>:<tag_prefix>-<hash>`.
     required: false
     default: cached-image
-  cache_key_prefix:
+  tag_prefix:
     description: |
-      REQUIRED. Namespace for the cache and the local docker tag.
+      REQUIRED. Project namespace. Dual-purpose:
+        - Tag partition (both runner types): appears in the local docker
+          tag as `<tag>:<tag_prefix>-<hash>`, preventing tag collisions
+          when multiple projects share one docker daemon. This is the
+          natural "tag" role on self-hosted runners.
+        - Buildx GHA cache scope (GitHub-hosted build path only): isolates
+          one project's layer cache from another's while staying stable
+          across edits to that project's Dockerfile, so layer reuse still
+          works as the Dockerfile evolves. This is the natural "cache key
+          prefix" role on hosted runners.
       Use a project-specific value (e.g. `<org>/<repo>-img`, typically
-      derived from github.repository at the call site).
-      Distinct projects MUST use distinct prefixes to avoid cross-project cache
-      interference on shared cache scopes and to keep self-hosted docker tags
-      disambiguated. There is no default: omitting this is a usage error.
+      derived from github.repository at the call site). Distinct projects
+      MUST use distinct prefixes. No default: omitting this is a usage error.
     required: true
 
 outputs:
@@ -93,12 +100,12 @@ runs:
         DOCKERFILE:  ${{ inputs.dockerfile }}
         BUILD_ARGS:  ${{ inputs.build_args }}
         BASE_DIGEST: ${{ steps.base.outputs.digest }}
-        PREFIX:      ${{ inputs.cache_key_prefix }}
+        PREFIX:      ${{ inputs.tag_prefix }}
         TAG_BASE:    ${{ inputs.tag }}
       run: |
         set -euo pipefail
         if [ -z "$PREFIX" ]; then
-          echo "::error::cache_key_prefix is required — see action README"
+          echo "::error::tag_prefix is required — see action README"
           exit 1
         fi
         SAFE_PREFIX=$(printf '%s' "$PREFIX" | tr '/ ' '__')

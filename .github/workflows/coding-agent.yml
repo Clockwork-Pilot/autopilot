@@ -32,7 +32,7 @@ on:
           ensure-docker-image.yml. Requires that upstream job and this workflow's
           self-hosted jobs to land on the SAME runner (local tags don't cross
           docker daemons). Mutually exclusive with `dockerfile:` — when set,
-          dockerfile/build_args/cache_key_prefix are ignored.
+          dockerfile/build_args/tag_prefix are ignored.
         required: false
         type: string
         default: ""
@@ -57,11 +57,12 @@ on:
         required: false
         type: string
         default: ""
-      cache_key_prefix:
+      tag_prefix:
         description: |
-          Namespace for the image cache when prepare-image builds internally.
+          Project tag/cache namespace used when prepare-image builds internally.
           Required when `docker_image` is unset; ignored when `docker_image` is set.
-          See .github/actions/ensure-docker-image/README.md for guidelines.
+          See .github/actions/ensure-docker-image/README.md for the dual role
+          (tag partition + Buildx GHA cache scope).
           Use e.g. `<owner>/<repo>-agent-img` (i.e. github.repository + a suffix).
         required: false
         type: string
@@ -209,9 +210,9 @@ jobs:
       image: ${{ steps.resolve.outputs.image }}
     steps:
       - name: Validate inputs
-        if: inputs.docker_image == '' && inputs.cache_key_prefix == ''
+        if: inputs.docker_image == '' && inputs.tag_prefix == ''
         run: |
-          echo "::error::cache_key_prefix is required when docker_image is unset"
+          echo "::error::tag_prefix is required when docker_image is unset"
           exit 1
 
       - name: Short-circuit to pre-built image
@@ -234,7 +235,7 @@ jobs:
           build_args:       ${{ inputs.build_args }}
           base_image:       ${{ inputs.agent_image != '' && inputs.agent_image || needs.image-digest.outputs.image }}
           tag:              autopilot-agent
-          cache_key_prefix: ${{ inputs.cache_key_prefix }}
+          tag_prefix:       ${{ inputs.tag_prefix }}
 
       - name: Resolve final image ref
         id: resolve

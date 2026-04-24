@@ -37,10 +37,11 @@ on:
         required: false
         type: string
         default: ""
-      cache_key_prefix:
+      tag_prefix:
         description: |
-          REQUIRED. Namespace for the image cache. See
-          .github/actions/ensure-docker-image/README.md for guidelines.
+          REQUIRED. Project tag/cache namespace. See
+          .github/actions/ensure-docker-image/README.md for the dual
+          role (tag partition + Buildx GHA cache scope).
           Use e.g. `<owner>/<repo>-check-img` (i.e. github.repository + a suffix).
         required: true
         type: string
@@ -60,7 +61,7 @@ jobs:
           build_args:       ${{ inputs.build_args }}
           base_image:       ${{ inputs.base_image }}
           tag:              autopilot-check
-          cache_key_prefix: ${{ inputs.cache_key_prefix }}
+          tag_prefix:       ${{ inputs.tag_prefix }}
 
       - uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@main
         with:

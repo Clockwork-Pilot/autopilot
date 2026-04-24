@@ -31,7 +31,7 @@ on:
         required: false
         type: string
         default: ""
-      cache_key_prefix:
+      tag_prefix:
         description: REQUIRED. See .github/actions/ensure-docker-image/README.md.
         required: true
         type: string
@@ -61,4 +61,4 @@ jobs:
           dockerfile:       ${{ inputs.dockerfile }}
           build_args:       ${{ inputs.build_args }}
           tag:              ${{ inputs.tag }}
-          cache_key_prefix: ${{ inputs.cache_key_prefix }}
+          tag_prefix:       ${{ inputs.tag_prefix }}

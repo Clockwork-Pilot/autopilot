@@ -9,7 +9,7 @@ Two paths, selected by whether you pass a `dockerfile`:
 | `dockerfile` input | Behavior |
 |---|---|
 | unset | Pulls `base_image`, tags it locally under a content-addressable tag, caches the tarball (GitHub-hosted) or relies on the docker daemon (self-hosted). Returns the tag. |
-| set | Builds the Dockerfile (via Buildx + `docker/build-push-action`) with `base_image` as the FROM contract. GitHub-hosted uses Buildx's GHA layer cache (`type=gha`, scoped by `cache_key_prefix`); self-hosted uses the docker daemon's persistent local layer cache. Returns the tag. |
+| set | Builds the Dockerfile (via Buildx + `docker/build-push-action`) with `base_image` as the FROM contract. GitHub-hosted uses Buildx's GHA layer cache (`type=gha`, scoped by `tag_prefix`); self-hosted uses the docker daemon's persistent local layer cache. Returns the tag. |
 
 Fast path (both modes): if a local image with the computed content-hashed tag already exists, the build/pull step is skipped entirely.
 
@@ -22,7 +22,7 @@ Fast path (both modes): if a local image with the computed content-hashed tag al
 | `build_args` | no | `""` | Newline-separated `KEY=VALUE`, forwarded to `--build-arg`. |
 | `base_image` | **yes** | — | Image reference. Pulled and tagged locally in pull mode; used for content-hash stability in build mode. The action does not rewrite your Dockerfile's `FROM` — set `base_image` to match what your Dockerfile imports. |
 | `tag` | no | `cached-image` | Local tag base. The action appends `<prefix>-<hash>`. |
-| `cache_key_prefix` | **yes** | — | Namespace for the cache and local tag. See [Cache key guidelines](#cache-key-guidelines). |
+| `tag_prefix` | **yes** | — | Project namespace; dual-purpose (tag partition on self-hosted, Buildx GHA cache scope on hosted). See [Tag prefix guidelines](#tag-prefix-guidelines). |
 
 ## Outputs
 
@@ -32,21 +32,25 @@ Fast path (both modes): if a local image with the computed content-hashed tag al
 | `cache_hit` | `true` if the local tag pre-existed and neither build nor pull ran; `false` otherwise. |
 | `digest` | Local image ID (`sha256:...`). |
 
-## Cache key guidelines
+## Tag prefix guidelines
 
-**You must supply `cache_key_prefix`.** There is no default. Picking the wrong value causes either cache collisions (distinct projects eating each other's entries) or cache thrash (same project, different prefix per workflow → no reuse).
+**You must supply `tag_prefix`.** There is no default. Picking the wrong value causes either cache collisions (distinct projects eating each other's entries) or cache thrash (same project, different prefix per workflow → no reuse).
+
+### Why it's called "tag prefix" and why it also acts as a cache key
+
+A single input plays two roles depending on runner type:
+
+- **Self-hosted** → it's a **tag partition**. It appears in the local docker tag as `<tag>:<tag_prefix>-<hash>` so multiple projects sharing one daemon don't collide on the same tag name. There is no external cache; layer reuse happens via the daemon's local cache, which is content-addressable and does not need the prefix.
+- **GitHub-hosted (build path)** → it's the **Buildx GHA cache scope** (`type=gha,scope=<tag_prefix>-buildimg`). Different projects → different scopes → no cross-project poisoning. Same project, Dockerfile evolves → same scope → buildx still reuses per-layer hashes, so edits don't invalidate everything.
+- **GitHub-hosted (pull path)** → it's the **`actions/cache` key** for the pulled tarball (`<tag_prefix>-pullimg-<base-digest>`), partitioning the cache per project (cache quotas are per-repo anyway).
+
+The name leans into the self-hosted framing because that's the one people intuit first; the hosted-runner cache-scope role is the natural additional duty of the same identifier.
 
 Rules of thumb:
 - **Namespace by repo**: `${{ github.repository }}-<purpose>`, e.g. `octocat/my-app-ci-img`.
-- **Do not include volatile fields** like `github.sha`, `github.run_id`, or the date. The action already hashes Dockerfile content, build args, and base image digest into the tag — anything beyond the prefix should be stable across runs that should share a cache.
+- **Do not include volatile fields** like `github.sha`, `github.run_id`, or the date. The action already hashes Dockerfile content, build args, and base image digest into the tag — the prefix should stay **stable** across runs that should share a cache.
 - **Distinguish purposes** if one repo builds multiple images: `${{ github.repository }}-test-img` vs `${{ github.repository }}-agent-img`.
 - **Organization-wide images** shared across several repos can use a shared prefix, but only if you trust every workflow writing to it not to poison the cache.
-
-### What the prefix controls
-
-1. **Buildx GHA scope** (`type=gha,scope=<prefix>-buildimg`) — isolates Buildx's layer cache per project. Layer-level reuse within that scope; you don't need to invalidate manually.
-2. **`actions/cache` key** (pull mode, `<prefix>-pullimg-<base-digest>`) — isolates the pulled tarball per project.
-3. **Local docker tag** (`<tag>:<prefix>-<content-hash>`) — disambiguates images when the same self-hosted runner serves multiple projects.
 
 ## Usage
 
@@ -62,7 +66,7 @@ jobs:
         uses: Clockwork-Pilot/autopilot/.github/actions/ensure-docker-image@main
         with:
           base_image:       ghcr.io/acme/runtime:latest
-          cache_key_prefix: ${{ github.repository }}-runtime
+          tag_prefix: ${{ github.repository }}-runtime
       - run: docker run --rm ${{ steps.img.outputs.image }} my-command
 ```
 
@@ -74,7 +78,7 @@ jobs:
   with:
     dockerfile:       Dockerfile.ci
     base_image:       ghcr.io/acme/runtime:latest
-    cache_key_prefix: ${{ github.repository }}-ci-img
+    tag_prefix: ${{ github.repository }}-ci-img
     build_args: |
       PYTHON_VERSION=3.12
       NODE_VERSION=22
