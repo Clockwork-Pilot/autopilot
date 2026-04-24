@@ -7,12 +7,23 @@ name: Check Constraints
 #   uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@<ref>
 on:
   workflow_call:
+    inputs:
+      submodules:
+        description: |
+          Forwarded to actions/checkout. Set to "true" or "recursive" when
+          project.k.json declares specs inside submodule paths; otherwise
+          those spec.k.json files will be missing at constraint-check time.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   check-constraints:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: ${{ inputs.submodules }}
       # Reference the action by repo-qualified ref: inside a reusable workflow
       # `./` resolves against the CALLER's checkout, not the workflow's home
       # repo, so `uses: ./.github/actions/...` would fail in consumer runs.
