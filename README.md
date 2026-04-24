@@ -5,6 +5,7 @@ Issue-driven coding agent orchestration: GitHub Actions workflows, composite act
 ## Contents
 
 - [Issue-driven coding agent (self-hosted runner)](#issue-driven-coding-agent-self-hosted-runner)
+- [Private repositories](#private-repositories)
 - [Runner PAT setup](#runner-pat-setup)
   - [Why this needs a PAT, not `GITHUB_TOKEN`](#why-this-needs-a-pat-not-github_token)
   - [One-time setup](#one-time-setup)
@@ -48,6 +49,24 @@ Flow overview:
 5. **Click the `agent-run` label** on the issue. `issue-trigger.yml` removes the label (so it's re-triggerable), verifies an online runner is labeled with your username, and dispatches `coding-agent.yml`.
 6. The runner checks out your fork in isolation, runs Claude against the issue in a docker container, and — on success — asks Claude to commit, runs constraint checks, pushes an `agent/<issue>-<slug>` branch, opens a PR `[AGENT] <issue title>`, and comments the constraints report on the issue.
 7. Re-applying the label on the same issue resumes the existing agent branch rather than starting over.
+
+## Private repositories
+
+Autopilot is designed for private repos on self-hosted runners — that is the recommended deployment shape. The public-fork walkthrough above works identically; only a few points are worth calling out for a private setup.
+
+**What runs where.** `coding-agent.yml` splits jobs by `runs-on`:
+- The agent execution jobs (the ones that actually run Claude inside the workspace container) land on `[self-hosted, <runner_label>]` — your runner, your hardware, your minutes.
+- Orchestration jobs (checkout, parse-issue, choose-branch, open-pr, comment-agent-result) run on `ubuntu-latest` and consume GitHub-hosted Actions minutes. A private repo on a Free/Team plan has a monthly minutes budget; orchestration is cheap (seconds per job) but not free. Enterprise plans with unlimited private minutes or a dedicated larger runner make this a non-issue.
+
+**`runner_label` routing.** `issue-trigger.yml` sets `runner_label = github.event.sender.login`, so the agent lands on a self-hosted runner whose label matches the GitHub username of whoever applied the `agent-run` label. Register one runner per user who should be allowed to trigger runs, each labeled with that user's login (case-sensitive). The preflight step in `issue-trigger.yml` uses `RUNNERS_PAT` to verify an online runner with that label exists, and fails fast with a clear message if not — see [Runner PAT setup](#runner-pat-setup).
+
+**Self-hosted runners and private vs. public repos.** GitHub explicitly recommends against self-hosted runners on **public** repos, because a fork's PR can execute arbitrary code on your runner. On **private** repos this risk disappears — only collaborators can push branches or open PRs, so self-hosted is the intended configuration and no warning applies.
+
+**Actions permissions.** Private-repo workflows need `Settings → Actions → General` to allow running workflows (default on) and, for the issue-label → dispatch chain, the default `GITHUB_TOKEN` permissions must be at least read/write for contents and pull-requests. `workflow_dispatch` between workflows in the same repo works without extra configuration.
+
+**Checkout of private sources.** `actions/checkout` uses the auto-minted `GITHUB_TOKEN`, which has access to the private repo by default — nothing extra to configure for the agent's own checkout. If your agent needs to clone *other* private repos (dependencies, vendored tooling), provide a PAT via `image_setup_script` env or a git credential helper inside the container.
+
+**`merge_into_upstream` on private repos.** The upstream PR flow still works across private repos, but the PAT scope depends on both repos being visible to the token: use a classic PAT with `repo` scope (not `public_repo`) if either the fork or upstream is private, or a fine-grained PAT with `Pull requests: write` on the private upstream (requires you to be a collaborator there). See [Opening PRs against the upstream repo](#opening-prs-against-the-upstream-repo-optional).
 
 ## Runner PAT setup
 
