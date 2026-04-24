@@ -37,6 +37,18 @@
           "cmd": "cd $PROJECT_ROOT && actionlint .github/workflows/*.yml",
           "description": "Static: actionlint (https://github.com/rhysd/actionlint) must report zero issues across all .github/workflows/*.yml files. Catches typos in ${{ needs.<job> }} references, mismatched composite action inputs, invalid context usage, and other structural issues that yq-only checks miss.",
           "fails_count": 1
+        },
+        "build_push_action_pinned_via_env": {
+          "id": "build_push_action_pinned_via_env",
+          "cmd": "BAD=$(grep -rhoE 'docker/build-push-action@[A-Za-z0-9._-]+' \"$PROJECT_ROOT/.github/workflows/\" \"$PROJECT_ROOT/.github/actions/\" 2>/dev/null | sort -u | grep -vx \"$BUILD_PUSH_ACTION_VER\" || true); [ -z \"$BAD\" ] || { echo \"Non-approved docker/build-push-action refs: $BAD (expected $BUILD_PUSH_ACTION_VER)\"; exit 1; }",
+          "description": "Security: every docker/build-push-action reference across .github/workflows/*.yml and .github/actions/**/*.yml must match $BUILD_PUSH_ACTION_VER (defined in project.k.json \u2192 specs.autopilot.envs). Single source of truth for the approved build-push-action pin; update there to rotate.",
+          "fails_count": 1
+        },
+        "setup_buildx_action_pinned_via_env": {
+          "id": "setup_buildx_action_pinned_via_env",
+          "cmd": "BAD=$(grep -rhoE 'docker/setup-buildx-action@[A-Za-z0-9._-]+' \"$PROJECT_ROOT/.github/workflows/\" \"$PROJECT_ROOT/.github/actions/\" 2>/dev/null | sort -u | grep -vx \"$SETUP_BUILDX_ACTION_VER\" || true); [ -z \"$BAD\" ] || { echo \"Non-approved docker/setup-buildx-action refs: $BAD (expected $SETUP_BUILDX_ACTION_VER)\"; exit 1; }",
+          "description": "Security: every docker/setup-buildx-action reference across .github/workflows/*.yml and .github/actions/**/*.yml must match $SETUP_BUILDX_ACTION_VER (defined in project.k.json \u2192 specs.autopilot.envs). Single source of truth for the approved setup-buildx-action pin; update there to rotate.",
+          "fails_count": 1
         }
       }
     },

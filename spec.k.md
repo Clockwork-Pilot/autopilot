@@ -24,9 +24,11 @@ Workflow structure constraints for .github/workflows
       - [upstream_pr_token_scoped_to_one_job](#upstream_pr_token_scoped_to_one_job)
     - [Feature: workflow_hygiene](#feature-workflow_hygiene)
       - [actionlint_passes](#actionlint_passes)
+      - [build_push_action_pinned_via_env](#build_push_action_pinned_via_env)
       - [checkout_pinned_via_env](#checkout_pinned_via_env)
       - [no_checkout_v4_in_workflows](#no_checkout_v4_in_workflows)
       - [no_hardcoded_base_image](#no_hardcoded_base_image)
+      - [setup_buildx_action_pinned_via_env](#setup_buildx_action_pinned_via_env)
 
 ## Features
 
@@ -94,6 +96,9 @@ Workflow structure constraints for .github/workflows
 #### actionlint_passes
 **Description:** Static: actionlint (https://github.com/rhysd/actionlint) must report zero issues across all .github/workflows/*.yml files. Catches typos in ${{ needs.<job> }} references, mismatched composite action inputs, invalid context usage, and other structural issues that yq-only checks miss.
 
+#### build_push_action_pinned_via_env
+**Description:** Security: every docker/build-push-action reference across .github/workflows/*.yml and .github/actions/**/*.yml must match $BUILD_PUSH_ACTION_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved build-push-action pin; update there to rotate.
+
 #### checkout_pinned_via_env
 **Description:** Security: every actions/checkout reference in workflows must match $CHECKOUT_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved checkout pin; update there to rotate.
 
@@ -102,3 +107,6 @@ Workflow structure constraints for .github/workflows
 
 #### no_hardcoded_base_image
 **Description:** Architectural: the autopilot-ws image reference must not appear in any workflow yml file — not as a default, not in a comment, not anywhere. The image must be supplied purely via a workflow/action input (base_image) by the consumer caller, so autopilot itself has no built-in coupling to any specific ghcr/registry ref.
+
+#### setup_buildx_action_pinned_via_env
+**Description:** Security: every docker/setup-buildx-action reference across .github/workflows/*.yml and .github/actions/**/*.yml must match $SETUP_BUILDX_ACTION_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved setup-buildx-action pin; update there to rotate.
