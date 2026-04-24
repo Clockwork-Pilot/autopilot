@@ -1,0 +1,64 @@
+name: Ensure Docker Image
+
+# Reusable workflow: thin wrapper around the ensure-docker-image composite
+# action, so callers can hoist image preparation into its own job when they
+# want it visible at the caller level (matrix, approval gate, handoff to
+# another reusable workflow).
+#
+# Runs on [self-hosted, <runner_label>] so the produced local docker tag is
+# on the same daemon that downstream agent/check jobs will use. If the caller
+# passes `docker_image` downstream, both jobs MUST land on the same runner
+# (local tags don't cross docker daemons).
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        description: GitHub username (matches self-hosted runner label).
+        required: true
+        type: string
+      base_image:
+        description: Base image ref. Pulled and tagged locally; also used as the FROM contract if a dockerfile is supplied.
+        required: true
+        type: string
+      dockerfile:
+        description: Optional path to a Dockerfile to build on top of base_image. Leave empty to only pull+tag base_image.
+        required: false
+        type: string
+        default: ""
+      build_args:
+        description: Newline-separated KEY=VALUE, forwarded to the builder.
+        required: false
+        type: string
+        default: ""
+      cache_key_prefix:
+        description: REQUIRED. See .github/actions/ensure-docker-image/README.md.
+        required: true
+        type: string
+      tag:
+        description: Local tag base (a content hash is appended).
+        required: false
+        type: string
+        default: cached-image
+    outputs:
+      docker_image:
+        description: Fully qualified local tag of the produced image. Pass to coding-agent.yml or another consumer.
+        value: ${{ jobs.ensure.outputs.image }}
+
+jobs:
+  ensure:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    outputs:
+      image: ${{ steps.e.outputs.image }}
+    steps:
+      - if: inputs.dockerfile != ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - id: e
+        uses: Clockwork-Pilot/autopilot/.github/actions/ensure-docker-image@main
+        with:
+          base_image:       ${{ inputs.base_image }}
+          dockerfile:       ${{ inputs.dockerfile }}
+          build_args:       ${{ inputs.build_args }}
+          tag:              ${{ inputs.tag }}
+          cache_key_prefix: ${{ inputs.cache_key_prefix }}

@@ -1,11 +1,10 @@
 name: check-constraints
-description: Run check_spec_constraints.py against the caller's checked-out workspace, using the autopilot-ws docker image.
+description: Run check_spec_constraints.py inside a prepared docker image. Image preparation (pull or build) is the caller's responsibility — use ensure-docker-image upstream of this step.
 
 inputs:
-  image_repo:
-    description: Registry repo for the constraint-check toolchain image.
-    required: false
-    default: ghcr.io/clockwork-pilot/autopilot-ws
+  image:
+    description: Local docker image ref produced by ensure-docker-image (or equivalent). The image must be an autopilot-ws-compatible runtime.
+    required: true
   command:
     description: Command to run inside the image. Default runs the constraint checker.
     required: false
@@ -14,69 +13,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - id: fetch
+    - name: Alias image to the tag run-in-docker-no-claude.sh expects
       shell: bash
       env:
-        IMAGE_REPO: ${{ inputs.image_repo }}
-      run: |
-        set -e
-        manifest=$(docker manifest inspect "$IMAGE_REPO:latest")
-        {
-          echo "manifest_json<<EOF_MANIFEST"
-          echo "$manifest"
-          echo "EOF_MANIFEST"
-        } >> "$GITHUB_OUTPUT"
+        IMAGE: ${{ inputs.image }}
+      run: docker tag "$IMAGE" ghcr.io/clockwork-pilot/autopilot-ws:cached
 
-    - id: digest
-      # Repo-qualified: inside a composite action invoked cross-repo,
-      # `./` resolves against the caller's checkout, not this repo.
-      uses: Clockwork-Pilot/autopilot/.github/actions/parse-digest@main
-      with:
-        manifest_json: ${{ steps.fetch.outputs.manifest_json }}
-        image_repo:    ${{ inputs.image_repo }}
-
-    - id: cache
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: /tmp/autopilot-ws.tar
-        key: docker-autopilot-ws-${{ steps.digest.outputs.image }}
-
-    - id: load
-      shell: bash
-      if: steps.cache.outputs.cache-hit == 'true'
-      env:
-        IMAGE_REPO: ${{ inputs.image_repo }}
-      run: |
-        out=$(docker load < /tmp/autopilot-ws.tar)
-        echo "$out"
-        # Re-tag to :cached regardless of whether the tar carried a tag
-        # (newer saves) or only an image ID (older saves from a digest-only
-        # ref). Without this, a dangling load leaves docker run unable to
-        # resolve the image locally and it falls back to pulling.
-        src=$(printf '%s\n' "$out" | sed -n -e 's/^Loaded image: //p' -e 's/^Loaded image ID: //p' | head -n1)
-        if [ -z "$src" ]; then
-          echo "docker load produced no recognizable output" >&2
-          exit 1
-        fi
-        docker tag "$src" "$IMAGE_REPO:cached"
-
-    - id: pull
-      shell: bash
-      if: steps.cache.outputs.cache-hit != 'true'
-      env:
-        AGENT_IMAGE: ${{ steps.digest.outputs.image }}
-        IMAGE_REPO: ${{ inputs.image_repo }}
-      run: |
-        docker pull "$AGENT_IMAGE"
-        # Tag before save: docker save on a digest-only reference loses the
-        # name on load, leaving a dangling image ID that docker run can't
-        # resolve by @sha256. Tagging gives the tar a stable local ref.
-        docker tag "$AGENT_IMAGE" "$IMAGE_REPO:cached"
-        docker save "$IMAGE_REPO:cached" > /tmp/autopilot-ws.tar
-
-    - id: run
+    - name: Run check inside image
       shell: bash
       env:
-        AGENT_IMAGE: ${{ inputs.image_repo }}:cached
+        AGENT_IMAGE: ghcr.io/clockwork-pilot/autopilot-ws:cached
         CMD: ${{ inputs.command }}
       run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"

@@ -15,18 +15,45 @@ on:
         description: Issue number to work on
         required: true
         type: string
-      agent_image:
+      docker_image:
         description: |
-          Override base image. Accepts any ref docker can pull (tag or digest).
-          If unset, resolves the latest digest of ghcr.io/clockwork-pilot/autopilot-ws.
+          Pre-built local docker tag to use as-is. When set, prepare-image skips
+          ensure-docker-image entirely and hands this ref to run-agent. Intended
+          for consumers who hoist image preparation into a separate job via
+          ensure-docker-image.yml. Requires that upstream job and this workflow's
+          self-hosted jobs to land on the SAME runner (local tags don't cross
+          docker daemons). Mutually exclusive with `dockerfile:` — when set,
+          dockerfile/build_args/cache_key_prefix are ignored.
         required: false
         type: string
         default: ""
-      image_setup_script:
+      agent_image:
         description: |
-          Optional bash snippet layered onto the base image as root (FROM base / RUN <script>).
-          Use for apt/pip/system-level deps. Workspace is NOT mounted — this runs at image-build time.
-          Cached by script hash on the runner; re-runs only when the script changes.
+          Override base image (fallback path, used when docker_image is unset).
+          Accepts any ref docker can pull (tag or digest). If unset, resolves the
+          latest digest of ghcr.io/clockwork-pilot/autopilot-ws.
+        required: false
+        type: string
+        default: ""
+      dockerfile:
+        description: |
+          Optional Dockerfile path (fallback path, used when docker_image is unset).
+          Must FROM an autopilot-ws-compatible base (USER node). When set, prepare-image
+          builds via ensure-docker-image.
+        required: false
+        type: string
+        default: ""
+      build_args:
+        description: Newline-separated KEY=VALUE build args, forwarded to ensure-docker-image.
+        required: false
+        type: string
+        default: ""
+      cache_key_prefix:
+        description: |
+          Namespace for the image cache when prepare-image builds internally.
+          Required when `docker_image` is unset; ignored when `docker_image` is set.
+          See .github/actions/ensure-docker-image/README.md for guidelines.
+          Use e.g. `${{ github.repository }}-agent-img`.
         required: false
         type: string
         default: ""
@@ -159,60 +186,56 @@ jobs:
   image-digest:
     uses: Clockwork-Pilot/autopilot/.github/workflows/image-digest.yml@main
 
-  # Picks the base image (user override or resolved digest) and, if
-  # image_setup_script is set, builds a thin derived image on the runner
-  # (FROM base / RUN <script>) tagged by sha256 of the script so repeat runs
-  # reuse docker's layer cache. Emits the final image ref for run-agent.
+  # Resolves the image for run-agent. Two modes:
+  #   - docker_image set → short-circuit, echo it back (consumer pre-built via
+  #     ensure-docker-image.yml on the same runner).
+  #   - docker_image unset → run ensure-docker-image internally, using dockerfile
+  #     if supplied or just pulling autopilot-ws otherwise.
   prepare-image:
     needs: [validate-runner, image-digest]
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     outputs:
-      image: ${{ steps.prep.outputs.image }}
+      image: ${{ steps.resolve.outputs.image }}
     steps:
-      - name: Resolve and prepare image
-        id: prep
-        env:
-          USER_AGENT_IMAGE:   ${{ inputs.agent_image }}
-          RESOLVED_IMAGE:     ${{ needs.image-digest.outputs.image }}
-          IMAGE_SETUP_SCRIPT: ${{ inputs.image_setup_script }}
+      - name: Validate inputs
+        if: inputs.docker_image == '' && inputs.cache_key_prefix == ''
         run: |
-          set -euo pipefail
+          echo "::error::cache_key_prefix is required when docker_image is unset"
+          exit 1
 
-          BASE="${USER_AGENT_IMAGE:-$RESOLVED_IMAGE}"
-          if [ -z "$BASE" ]; then
-            echo "::error::Could not determine base image — both inputs.agent_image and image-digest output are empty"
-            exit 1
+      - name: Short-circuit to pre-built image
+        id: passthrough
+        if: inputs.docker_image != ''
+        env:
+          DOCKER_IMAGE: ${{ inputs.docker_image }}
+        run: echo "image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout caller repo (for Dockerfile access)
+        if: inputs.docker_image == '' && inputs.dockerfile != ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Build or pull image internally
+        id: internal
+        if: inputs.docker_image == ''
+        uses: Clockwork-Pilot/autopilot/.github/actions/ensure-docker-image@main
+        with:
+          dockerfile:       ${{ inputs.dockerfile }}
+          build_args:       ${{ inputs.build_args }}
+          base_image:       ${{ inputs.agent_image != '' && inputs.agent_image || needs.image-digest.outputs.image }}
+          tag:              autopilot-agent
+          cache_key_prefix: ${{ inputs.cache_key_prefix }}
+
+      - name: Resolve final image ref
+        id: resolve
+        env:
+          PASSTHROUGH: ${{ steps.passthrough.outputs.image }}
+          INTERNAL:    ${{ steps.internal.outputs.image }}
+        run: |
+          if [ -n "$PASSTHROUGH" ]; then
+            echo "image=$PASSTHROUGH" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=$INTERNAL"    >> "$GITHUB_OUTPUT"
           fi
-
-          if [ -z "$IMAGE_SETUP_SCRIPT" ]; then
-            echo "::notice::No image_setup_script provided — using base image as-is: $BASE"
-            echo "image=$BASE" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          CTX=$(mktemp -d)
-          trap 'rm -rf "$CTX"' EXIT
-
-          printf '%s' "$IMAGE_SETUP_SCRIPT" > "$CTX/setup.sh"
-          chmod +x "$CTX/setup.sh"
-          SCRIPT_HASH=$(sha256sum "$CTX/setup.sh" | cut -c1-16)
-          BASE_HASH=$(printf '%s' "$BASE" | sha256sum | cut -c1-16)
-          TAG="autopilot-prepared:${BASE_HASH}-${SCRIPT_HASH}"
-
-          cat > "$CTX/Dockerfile" <<EOF
-          # syntax=docker/dockerfile:1
-          FROM $BASE
-          USER 0
-          COPY setup.sh /tmp/autopilot-setup.sh
-          RUN bash /tmp/autopilot-setup.sh && rm /tmp/autopilot-setup.sh
-          # Drop back to the image's default user (image-defined USER directive
-          # is preserved across FROM, so this reassertion is explicit, not new).
-          USER node
-          EOF
-
-          echo "::notice::Building prepared image $TAG from $BASE (script hash: $SCRIPT_HASH)"
-          docker build -t "$TAG" "$CTX"
-          echo "image=$TAG" >> "$GITHUB_OUTPUT"
 
   run-agent:
     needs: [validate-runner, fetch-issue, parse-issue, choose-branch, image-digest, prepare-image]

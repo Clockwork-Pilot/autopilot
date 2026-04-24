@@ -10,9 +10,10 @@ Issue-driven coding agent orchestration: GitHub Actions workflows, composite act
   - [Why this needs a PAT, not `GITHUB_TOKEN`](#why-this-needs-a-pat-not-github_token)
   - [One-time setup](#one-time-setup)
 - [Installing extra dependencies](#installing-extra-dependencies)
-  - [Option A — inline setup script](#option-a--inline-setup-script)
-  - [Option B — your own image](#option-b--your-own-image)
-  - [Migrating from A to B](#migrating-from-a-to-b)
+  - [Write a Dockerfile](#write-a-dockerfile)
+  - [Use it from the caller workflow](#use-it-from-the-caller-workflow)
+  - [Properties](#properties)
+  - [When to publish to a registry instead](#when-to-publish-to-a-registry-instead)
 - [Opening PRs against the upstream repo (optional)](#opening-prs-against-the-upstream-repo-optional)
   - [Why a token is needed here but not in the browser](#why-a-token-is-needed-here-but-not-in-the-browser)
   - [One-time setup](#one-time-setup-1)
@@ -64,7 +65,7 @@ Autopilot is designed for private repos on self-hosted runners — that is the r
 
 **Actions permissions.** Private-repo workflows need `Settings → Actions → General` to allow running workflows (default on) and, for the issue-label → dispatch chain, the default `GITHUB_TOKEN` permissions must be at least read/write for contents and pull-requests. `workflow_dispatch` between workflows in the same repo works without extra configuration.
 
-**Checkout of private sources.** `actions/checkout` uses the auto-minted `GITHUB_TOKEN`, which has access to the private repo by default — nothing extra to configure for the agent's own checkout. If your agent needs to clone *other* private repos (dependencies, vendored tooling), provide a PAT via `image_setup_script` env or a git credential helper inside the container.
+**Checkout of private sources.** `actions/checkout` uses the auto-minted `GITHUB_TOKEN`, which has access to the private repo by default — nothing extra to configure for the agent's own checkout. If your agent needs to clone *other* private repos (dependencies, vendored tooling), add the credential handling to your custom Dockerfile (see [Installing extra dependencies](#installing-extra-dependencies)) or mount a git credential helper inside the container.
 
 **`merge_into_upstream` on private repos.** The upstream PR flow still works across private repos, but the PAT scope depends on both repos being visible to the token: use a classic PAT with `repo` scope (not `public_repo`) if either the fork or upstream is private, or a fine-grained PAT with `Pull requests: write` on the private upstream (requires you to be a collaborator there). See [Opening PRs against the upstream repo](#opening-prs-against-the-upstream-repo-optional).
 
@@ -112,69 +113,80 @@ The resulting token is scoped to one repo, read-only, and touches one endpoint �
 
 ## Installing extra dependencies
 
-The agent runs inside `ghcr.io/clockwork-pilot/autopilot-ws`, which ships a general-purpose toolchain. If your repo needs packages that aren't in the base image (e.g. `ffmpeg`, a specific Python/Rust version, a vendored CLI), you have two options. Both land at the same runtime shape — an image whose `USER` is `node` and whose `PATH` contains your tools — so you can start with Option A and graduate to B without changing anything the agent sees.
+The agent runs inside `ghcr.io/clockwork-pilot/autopilot-ws`, which ships a general-purpose toolchain. If your repo needs packages that aren't in the base image (e.g. `ffmpeg`, a specific Python/Rust version, a vendored CLI), add a Dockerfile to your fork and pass its path to the agent workflow. Image preparation (pull or build, cache, tag) is handled by the [`ensure-docker-image`](.github/actions/ensure-docker-image/README.md) composite action — a generic Buildx wrapper with unified caching for GitHub-hosted and self-hosted runners.
 
-### Option A — inline setup script
+### Write a Dockerfile
 
-Pass a bash snippet as the `image_setup_script` input of the reusable workflow. The self-hosted runner layers it onto the base image as a single `RUN` step (`FROM base / RUN <script>`, executed as `USER 0`), tags the result by `sha256(script)`, and reuses docker's layer cache on repeat runs.
+```dockerfile
+# your fork: Dockerfile.agent
+FROM ghcr.io/clockwork-pilot/autopilot-ws:latest
+USER 0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+USER node
+```
+
+The Dockerfile must satisfy the `autopilot-ws` runtime contract:
+- `FROM ghcr.io/clockwork-pilot/autopilot-ws:<tag>` (or an ABI-compatible derivative).
+- Final `USER node`.
+- Tools on `node`'s `PATH`.
+
+### Use it from the caller workflow
+
+Two shapes, pick whichever fits:
+
+**Inline (simple):** pass `dockerfile:` to `coding-agent.yml` directly; image preparation runs inside its `prepare-image` job.
 
 ```yaml
-# your fork: .github/workflows/my-agent.yml
+# your fork: .github/workflows/agent.yml
 jobs:
   agent:
     uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
     with:
-      runner_label: ${{ github.actor }}
-      issue_number: ${{ github.event.issue.number }}
-      image_setup_script: |
-        set -euo pipefail
-        apt-get update
-        apt-get install -y --no-install-recommends ffmpeg libsndfile1
-        rm -rf /var/lib/apt/lists/*
+      runner_label:     ${{ github.actor }}
+      issue_number:     ${{ github.event.issue.number }}
+      dockerfile:       Dockerfile.agent
+      cache_key_prefix: ${{ github.repository }}-agent-img
 ```
 
-Properties:
-- Runs as **root** at image-build time — `apt-get`, `pip install` system-wide, `/usr/local/bin` writes all work.
-- The **workspace is not mounted** here. The script cannot read `pyproject.toml`/`package.json` from the repo; use Option A only for deps that don't depend on repo contents.
-- Cached on the runner by script hash. Unchanged script → zero-cost reuse; changed script → one rebuild, then cached again.
-- No registry involved. Nothing pushed, nothing to authenticate against.
+**Hoisted (visible image job):** call `ensure-docker-image.yml` first, hand its output to `coding-agent.yml` via `docker_image:`. Preferred when you want the image-prep cache hit/miss visible at the caller level, or when you want to insert consumer-owned steps around it. Both jobs must land on the same self-hosted runner (single runner per `runner_label` — the default single-user setup).
 
-Input size caps at ~65k chars per `workflow_call` input. Fine for any realistic setup; if your script is long enough to feel awkward in YAML, that's the signal to switch to Option B.
+```yaml
+jobs:
+  image:
+    uses: clockwork-pilot/autopilot/.github/workflows/ensure-docker-image.yml@v1
+    with:
+      runner_label:     ${{ github.actor }}
+      base_image:       ghcr.io/clockwork-pilot/autopilot-ws:latest
+      dockerfile:       Dockerfile.agent
+      tag:              autopilot-agent
+      cache_key_prefix: ${{ github.repository }}-agent-img
 
-### Option B — your own image
+  agent:
+    needs: image
+    uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
+    with:
+      runner_label: ${{ github.actor }}
+      issue_number: ${{ github.event.issue.number }}
+      docker_image: ${{ needs.image.outputs.docker_image }}
+```
 
-When the setup grows past a handful of lines, or when you want an image shared across many repos, build your own image from `ghcr.io/clockwork-pilot/autopilot-ws` and pass it as `agent_image:`. The [`templates/user-image/`](templates/user-image/) directory in this repo has a ready-to-copy `Dockerfile` and `build-and-push.yml` workflow.
+See `autopilot-selftest` for both shapes dogfooded against this repo.
 
-One-time setup in your fork:
+### Properties
 
-1. Copy `templates/user-image/Dockerfile` into your fork at the same path.
-2. Copy `templates/user-image/build-and-push.yml` into your fork as `.github/workflows/build-agent-image.yml`.
-3. Edit the Dockerfile's `RUN` block to install your dependencies.
-4. Push to `main`. The build workflow pushes to `ghcr.io/<you>/autopilot-ws-custom:latest` (public by default inside your user/org namespace — adjust package visibility in GHCR settings if you need it private).
-5. In your caller workflow, set `agent_image:`:
+- **Runs as root** at image-build time — `apt-get`, `pip install` system-wide, `/usr/local/bin` writes all work.
+- **Build context** is the caller's checkout, so `COPY` from `pyproject.toml` / `package.json` works if you need dep manifests at build time.
+- **Caching** is unified:
+  - GitHub-hosted: Buildx GHA layer cache (`type=gha`), scoped by `cache_key_prefix`.
+  - Self-hosted: docker daemon's local layer cache (persistent).
+  - Fast-path: if the content-hashed local tag already exists, build is skipped entirely.
+- **No registry required** in either shape — images live as local docker tags on the self-hosted runner. See [`ensure-docker-image/README.md`](.github/actions/ensure-docker-image/README.md) for cache-key guidelines.
 
-   ```yaml
-   with:
-     runner_label: ${{ github.actor }}
-     issue_number: ${{ github.event.issue.number }}
-     agent_image:  ghcr.io/${{ github.repository_owner }}/autopilot-ws-custom:latest
-   ```
+### When to publish to a registry instead
 
-Properties:
-- Runs as **root** at image-build time, in your CI, same as Option A — just on a GitHub-hosted runner instead of your self-hosted one.
-- Image is versioned in GHCR; pin to `@sha256:...` instead of `:latest` for full reproducibility.
-- Private images need a `docker login ghcr.io` step in your caller workflow (before `uses:`), or make the GHCR package public.
-- You can set **both** `agent_image:` and `image_setup_script:` — the setup script then layers on top of your image, useful for one-off additions without rebuilding and re-pushing.
-
-### Migrating from A to B
-
-Because both options produce the same runtime image shape, moving from A to B is mechanical:
-
-1. Paste the body of your `image_setup_script` into the `RUN` block of `templates/user-image/Dockerfile` in your fork.
-2. Merge to `main` to trigger the build.
-3. In your caller workflow, delete `image_setup_script:` and set `agent_image:` to the pushed tag.
-
-The agent behavior is identical before and after.
+If you want an image shared across many repos, pinned by digest, or available to pooled/ephemeral self-hosted runners, build and push to your own registry. [`templates/user-image/`](templates/user-image/) has a ready-to-copy `Dockerfile` and `build-and-push.yml` workflow that pushes to `ghcr.io/<you>/autopilot-ws-custom:latest`. Then in the caller set `agent_image:` (instead of `dockerfile:`) to the pushed ref; `coding-agent.yml` will pull it instead of building. Private images need a `docker login ghcr.io` step in the caller before the `uses:` line, or make the package public.
 
 ## Opening PRs against the upstream repo (optional)
 

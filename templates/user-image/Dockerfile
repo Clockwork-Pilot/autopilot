@@ -1,9 +1,11 @@
-# Template for building your own agent image.
+# Template for building your own agent image and pushing it to a registry.
+#
+# Use this path when you want an image shared across many repos, pinned by
+# digest, or available to pooled/ephemeral self-hosted runners. For single
+# self-hosted runner setups, prefer passing `dockerfile:` directly to the
+# agent workflow — see autopilot/README.md → Installing extra dependencies.
 #
 # Start from the pinned autopilot base image and layer in your dependencies.
-# The RUN block below is where you'd paste the contents of an
-# `image_setup_script` that has outgrown being inlined in the caller workflow.
-#
 # Pin to a digest (`@sha256:...`) rather than `:latest` for reproducibility.
 # Look up the current digest with:
 #   docker manifest inspect ghcr.io/clockwork-pilot/autopilot-ws:latest \
