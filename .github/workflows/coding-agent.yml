@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: ""
+      extra_docker_args:
+        description: Extra args spliced into `docker run` for the agent + constraint containers (forwarded as CLAUDE_EXTRA_DOCKER_ARGS).
+        required: false
+        type: string
+        default: ""
     secrets:
       UPSTREAM_PR_TOKEN:
         description: PAT used by open-upstream-pr when merge_into_upstream is true. Optional — only issues that opt in require it.
@@ -301,6 +306,7 @@ jobs:
           TIMEOUT_SECS: ${{ needs.parse-issue.outputs.timeout_secs }}
           PROMPT:       ${{ needs.parse-issue.outputs.agent_task_text }}
           AGENT_IMAGE:  ${{ needs.prepare-image.outputs.image }}
+          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
           echo "::group::Claude Agent Output"
           set +e
@@ -315,6 +321,7 @@ jobs:
         if: always()
         env:
           AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
           # stdout → issue comment; exit code gates the commit step.
           set +e
@@ -350,6 +357,7 @@ jobs:
           MODEL:       ${{ needs.parse-issue.outputs.model }}
           PROMPT:      commit changes
           AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: bash .github/scripts/run-in-docker-claude.sh --allow-git-commit || true
 
       - name: Detect new commit

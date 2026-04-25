@@ -9,6 +9,10 @@ inputs:
     description: Command to run inside the image. Default runs the constraint checker.
     required: false
     default: check_spec_constraints.py
+  extra_docker_args:
+    description: Extra args spliced into `docker run` (forwarded as CLAUDE_EXTRA_DOCKER_ARGS).
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -18,4 +22,5 @@ runs:
       env:
         AGENT_IMAGE: ${{ inputs.image }}
         CMD: ${{ inputs.command }}
+        CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
       run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"

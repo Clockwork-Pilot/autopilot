@@ -45,6 +45,11 @@ on:
           Use e.g. `<owner>/<repo>-check-img` (i.e. github.repository + a suffix).
         required: true
         type: string
+      extra_docker_args:
+        description: Extra args spliced into `docker run` for the check container.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   check-constraints:
@@ -65,4 +70,5 @@ jobs:
 
       - uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@main
         with:
-          image: ${{ steps.image.outputs.image }}
+          image:             ${{ steps.image.outputs.image }}
+          extra_docker_args: ${{ inputs.extra_docker_args }}

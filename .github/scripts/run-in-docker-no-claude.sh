@@ -4,8 +4,9 @@
 # for callers that just need the toolchain image (e.g. constraint checks).
 #
 # Env:
-#   AGENT_IMAGE      — required. Autopilot-ws-compatible image ref to run in.
-#   GITHUB_WORKSPACE — defaults to $PWD so the script is usable outside CI.
+#   AGENT_IMAGE              — required. Autopilot-ws-compatible image ref to run in.
+#   GITHUB_WORKSPACE         — defaults to $PWD so the script is usable outside CI.
+#   CLAUDE_EXTRA_DOCKER_ARGS — optional extra args spliced into `docker run`.
 # Usage: run-in-docker-no-claude.sh <bash command string>
 set -uo pipefail
 
@@ -24,6 +25,7 @@ if command -v docker >/dev/null 2>&1; then
     -e "HOST_UID=$(id -u)" \
     -e "HOST_GID=$(id -g)" \
     -v "$GITHUB_WORKSPACE:/workspace" \
+    ${CLAUDE_EXTRA_DOCKER_ARGS:-} \
     "$AGENT_IMAGE" \
     bash -c "source /docker-scripts/user-entrypoint.sh; $CMD"
 else
