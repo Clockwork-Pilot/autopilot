@@ -66,7 +66,7 @@
       "constraints": {
         "dispatcher_fails_on_missing_step": {
           "id": "dispatcher_fails_on_missing_step",
-          "cmd": "cd $PROJECT_ROOT && ERR=$(.github/scripts/act-step-dispatch.sh coding-agent.yml nonexistent_step_xyz 2>&1 1>/dev/null); RC=$?; [ $RC -ne 0 ] && echo \"$ERR\" | grep -q \"Step 'nonexistent_step_xyz' not found\"",
+          "cmd": "cd $PROJECT_ROOT && ERR=$(.github/scripts/test/act-step-dispatch.sh coding-agent.yml nonexistent_step_xyz 2>&1 1>/dev/null); RC=$?; [ $RC -ne 0 ] && echo \"$ERR\" | grep -q \"Step 'nonexistent_step_xyz' not found\"",
           "description": "Negative: act-step-dispatch.sh must exit non-zero AND emit the missing-step error to stderr (not stdout) when the requested step does not exist",
           "fails_count": 1
         }
@@ -120,6 +120,18 @@
           "id": "parse_digest_via_action",
           "cmd": "cd $PROJECT_ROOT && bash .github/scripts/test/run-act-step-checks.sh act-step-runner.yml parse-digest",
           "description": "Behavioral: parse-digest fixtures pass against the act-step-runner.yml wrapper. Replaces parse_digest_cases.",
+          "fails_count": 1
+        },
+        "fixtures_colocated_with_actions": {
+          "id": "fixtures_colocated_with_actions",
+          "cmd": "cd $PROJECT_ROOT && for step in parse-issue choose-branch parse-digest; do [ -d \".github/actions/$step/fixtures\" ] || { echo \"missing .github/actions/$step/fixtures\"; exit 1; }; done",
+          "description": "Structural: each behaviorally tested composite action must own its fixtures under .github/actions/<step>/fixtures/. Co-locating fixtures next to action.yml/script.sh keeps them discoverable when modifying the action and prevents drift back to a centralized scripts/test tree.",
+          "fails_count": 1
+        },
+        "no_legacy_centralized_fixtures": {
+          "id": "no_legacy_centralized_fixtures",
+          "cmd": "cd $PROJECT_ROOT && [ ! -e .github/scripts/test/fixtures ]",
+          "description": "Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.",
           "fails_count": 1
         }
       }

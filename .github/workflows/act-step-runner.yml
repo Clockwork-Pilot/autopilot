@@ -29,10 +29,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - name: Dispatch
         run: |
-          bash .github/scripts/act-step-dispatch.sh "${{ inputs.workflow }}" "${{ inputs.step_id }}" --inputs '${{ inputs.inputs_json }}' --artifact-server-path "${{ inputs.artifact_path }}"
+          bash .github/scripts/test/act-step-dispatch.sh "${{ inputs.workflow }}" "${{ inputs.step_id }}" --inputs '${{ inputs.inputs_json }}' --artifact-server-path "${{ inputs.artifact_path }}"
 
   # Composite-action test wrappers. Each job mirrors the env: shape of the
-  # original workflow job, so fixtures under .github/scripts/test/fixtures/<id>
+  # original workflow job, so fixtures under .github/actions/<id>/fixtures/
   # that key on expressions like "needs.fetch-issue.outputs.title" keep working
   # when the test script targets `act-step-runner.yml <id>`. The run: step
   # invokes the composite action's script directly (bypassing `uses:`), which

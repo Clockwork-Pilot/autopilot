@@ -14,6 +14,8 @@ Workflow structure constraints for .github/workflows
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
       - [choose_branch_via_action](#choose_branch_via_action)
+      - [fixtures_colocated_with_actions](#fixtures_colocated_with_actions)
+      - [no_legacy_centralized_fixtures](#no_legacy_centralized_fixtures)
       - [parse_digest_via_action](#parse_digest_via_action)
       - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
@@ -58,6 +60,12 @@ Workflow structure constraints for .github/workflows
 
 #### choose_branch_via_action
 **Description:** Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.
+
+#### fixtures_colocated_with_actions
+**Description:** Structural: each behaviorally tested composite action must own its fixtures under .github/actions/<step>/fixtures/. Co-locating fixtures next to action.yml/script.sh keeps them discoverable when modifying the action and prevents drift back to a centralized scripts/test tree.
+
+#### no_legacy_centralized_fixtures
+**Description:** Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.
 
 #### parse_digest_via_action
 **Description:** Behavioral: parse-digest fixtures pass against the act-step-runner.yml wrapper. Replaces parse_digest_cases.

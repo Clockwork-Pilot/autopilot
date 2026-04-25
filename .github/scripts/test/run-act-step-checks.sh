@@ -1,14 +1,14 @@
 #!/bin/bash
 # Usage: run-act-step-checks.sh <workflow> <step>
 # Dispatches <step> from <workflow> against every fixture under
-# .github/scripts/test/fixtures/<step>/<case>/ and compares the step's
+# .github/actions/<step>/fixtures/<case>/ and compares the step's
 # $GITHUB_OUTPUT (parsed into JSON) against the fixture's expected.json.
 set -u
 
 WORKFLOW="${1:?workflow required (e.g. coding-agent.yml)}"
 STEP="${2:?step id required (e.g. parse-issue)}"
 
-FIX_ROOT=".github/scripts/test/fixtures/$STEP"
+FIX_ROOT=".github/actions/$STEP/fixtures"
 [ -d "$FIX_ROOT" ] || { echo "No fixtures dir: $FIX_ROOT" >&2; exit 1; }
 
 parse_github_output_to_json() {
@@ -38,7 +38,7 @@ FAIL=0
 for case_dir in "$FIX_ROOT"/*/; do
   case=$(basename "$case_dir")
   ART=$(mktemp -d)
-  if ! .github/scripts/act-step-dispatch.sh "$WORKFLOW" "$STEP" \
+  if ! .github/scripts/test/act-step-dispatch.sh "$WORKFLOW" "$STEP" \
          --inputs "$(cat "$case_dir/input.json")" \
          --artifact-server-path "$ART" -q; then
     echo "FAIL: $STEP/$case (dispatch)"
