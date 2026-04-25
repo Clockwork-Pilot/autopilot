@@ -4,7 +4,7 @@ description: Pick the agent work branch and base branch given override precedenc
 inputs:
   pr_branch:             { required: false, default: "", description: Explicit branch from frontmatter. }
   agent_branch_default:  { required: true,  description: Default agent branch if nothing else is set. }
-  existing_agent_branch: { required: false, default: "", description: Existing agent branch, if any. }
+  existing_agent_branch: { required: false, default: "", description: "Existing agent branch, if any." }
   base_from_issue:       { required: false, default: "", description: Base branch override from frontmatter. }
   default_branch:        { required: true,  description: Repo default branch (fallback base). }
 

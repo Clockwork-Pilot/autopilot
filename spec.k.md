@@ -14,8 +14,14 @@ Workflow structure constraints for .github/workflows
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
+      - [choose_branch_has_negative_fixture](#choose_branch_has_negative_fixture)
+      - [choose_branch_test_uses_composite_action](#choose_branch_test_uses_composite_action)
       - [choose_branch_via_action](#choose_branch_via_action)
+      - [composite_actions_yaml_loadable](#composite_actions_yaml_loadable)
+      - [every_action_with_fixtures_has_negative_fixture](#every_action_with_fixtures_has_negative_fixture)
       - [no_legacy_centralized_fixtures](#no_legacy_centralized_fixtures)
+      - [parse_issue_has_negative_fixture](#parse_issue_has_negative_fixture)
+      - [parse_issue_test_uses_composite_action](#parse_issue_test_uses_composite_action)
       - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
       - [open_upstream_pr_job_shape](#open_upstream_pr_job_shape)
@@ -60,11 +66,29 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - One behavioral constraint per dispatchable step, using mktemp -d for isolation
 
+#### choose_branch_has_negative_fixture
+**Description:** Meta: choose-branch/fixtures/ must contain at least one case dir named negative-*. Same rationale as parse_issue_has_negative_fixture — keeps the diff-fires proof load-bearing.
+
+#### choose_branch_test_uses_composite_action
+**Description:** Architectural: the choose-branch test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/choose-branch, not by open-coding run: bash .github/actions/choose-branch/script.sh. Same gate as parse_issue_test_uses_composite_action — keeps the harness exercising action.yml metadata.
+
 #### choose_branch_via_action
 **Description:** Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.
 
+#### composite_actions_yaml_loadable
+**Description:** Static: every .github/actions/*/action.yml must parse as valid YAML. Catches malformed flow-mapping descriptions, unclosed quotes, and similar metadata breaks that the behavioral fixture harness would miss when it bypasses action.yml.
+
+#### every_action_with_fixtures_has_negative_fixture
+**Description:** Meta: every .github/actions/<name>/fixtures/ tree must contain at least one negative-*/ case. Generalizes parse_issue_has_negative_fixture and choose_branch_has_negative_fixture: any action with positive fixtures must also carry a live demonstration that the harness diff fires on mismatch. Future actions added with fixtures will be covered automatically.
+
 #### no_legacy_centralized_fixtures
 **Description:** Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.
+
+#### parse_issue_has_negative_fixture
+**Description:** Meta: parse-issue/fixtures/ must contain at least one case dir named negative-*. The harness inverts diff polarity for these (matched=FAIL, mismatch=OK), making them a live demonstration that fixture comparison is actually evaluated.
+
+#### parse_issue_test_uses_composite_action
+**Description:** Architectural: the parse-issue test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata (broken outputs:, mistyped expressions) fails the suite instead of going undetected.
 
 #### parse_issue_via_action
 **Description:** Behavioral: parse-issue fixtures pass against the act-step-runner.yml wrapper which invokes .github/actions/parse-issue/script.sh. Replaces parse_issue_cases after refactor to composite action.

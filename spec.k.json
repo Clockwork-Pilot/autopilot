@@ -127,6 +127,30 @@
           "cmd": "cd $PROJECT_ROOT && [ ! -e .github/scripts/test/fixtures ]",
           "description": "Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.",
           "fails_count": 1
+        },
+        "parse_issue_test_uses_composite_action": {
+          "id": "parse_issue_test_uses_composite_action",
+          "cmd": "F=$PROJECT_ROOT/.github/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"parse-issue\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/parse-issue' || { echo \"act-step-runner.yml job parse-issue must invoke the composite action via uses: ./.github/actions/parse-issue (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
+          "description": "Architectural: the parse-issue test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata (broken outputs:, mistyped expressions) fails the suite instead of going undetected.",
+          "fails_count": 1
+        },
+        "composite_actions_yaml_loadable": {
+          "id": "composite_actions_yaml_loadable",
+          "cmd": "for f in $PROJECT_ROOT/.github/actions/*/action.yml; do python3 -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1]))\" \"$f\" || { echo \"Invalid YAML: $f\"; exit 1; }; done",
+          "description": "Static: every .github/actions/*/action.yml must parse as valid YAML. Catches malformed flow-mapping descriptions, unclosed quotes, and similar metadata breaks that the behavioral fixture harness would miss when it bypasses action.yml.",
+          "fails_count": 1
+        },
+        "choose_branch_test_uses_composite_action": {
+          "id": "choose_branch_test_uses_composite_action",
+          "cmd": "F=$PROJECT_ROOT/.github/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"choose-branch\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/choose-branch' || { echo \"act-step-runner.yml job choose-branch must invoke the composite action via uses: ./.github/actions/choose-branch (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
+          "description": "Architectural: the choose-branch test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/choose-branch, not by open-coding run: bash .github/actions/choose-branch/script.sh. Same gate as parse_issue_test_uses_composite_action \u2014 keeps the harness exercising action.yml metadata.",
+          "fails_count": 1
+        },
+        "every_action_with_fixtures_has_negative_fixture": {
+          "id": "every_action_with_fixtures_has_negative_fixture",
+          "cmd": "MISSING=\"\"; for d in $PROJECT_ROOT/.github/actions/*/fixtures/; do [ -d \"$d\" ] || continue; ls -d \"$d\"negative-*/ >/dev/null 2>&1 || MISSING=\"$MISSING $(dirname $d | xargs basename)\"; done; [ -z \"$MISSING\" ] || { echo \"actions missing negative-*/ fixture:$MISSING. Each action with a fixtures/ dir must include at least one negative-* case so the harness diff is provably load-bearing.\"; exit 1; }",
+          "description": "Meta: every .github/actions/<name>/fixtures/ tree must contain at least one negative-*/ case. Generalizes parse_issue_has_negative_fixture and choose_branch_has_negative_fixture: any action with positive fixtures must also carry a live demonstration that the harness diff fires on mismatch. Future actions added with fixtures will be covered automatically.",
+          "fails_count": 1
         }
       }
     },

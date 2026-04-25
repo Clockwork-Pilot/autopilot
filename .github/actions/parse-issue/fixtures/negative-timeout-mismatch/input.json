@@ -1,0 +1,5 @@
+{
+  "needs.fetch-issue.outputs.title": "  Feat: Add Café Support (v2)!!  ",
+  "needs.fetch-issue.outputs.body_raw": "---\r\ntimeout: 30\r\npr_branch: null\r\nbase_branch: \"\"\r\n---\r\nImplement the feature.\r\n\r\nStep 1: do X.\r\n",
+  "inputs.issue_number": "42"
+}

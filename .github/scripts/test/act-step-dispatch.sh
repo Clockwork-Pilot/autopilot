@@ -2,11 +2,24 @@
 set -e
 
 # Generic workflow-step dispatcher.
-# Runs a job's `run:` blocks with a simulated env, using the job's declared
-# `env:` block as the single source of truth for inputs. Each expression
-# `${{ expr }}` in an env value is resolved against the --inputs JSON,
-# whose keys are the expression paths themselves (e.g. "needs.fetch-issue.outputs.title",
-# "inputs.issue_number").
+#
+# Two execution paths, decided by the job's shape:
+#
+# (A) Composite-action job — the job invokes a local composite via
+#     `uses: ./.github/actions/<name>` plus a `with:` block. The dispatcher
+#     loads `.github/actions/<name>/action.yml`, resolves `with:` expressions
+#     against --inputs JSON, then walks `runs.steps[]` from action.yml,
+#     evaluating each step's `env:` (substituting `${{ inputs.X }}`) and
+#     executing its `run:` block. This exercises the action.yml contract on
+#     every test run — malformed metadata fails the harness.
+#
+# (B) Inline-run job — the job has its own `env:` and `run:` steps. The
+#     dispatcher resolves the job's `env:` block against --inputs JSON and
+#     executes the `run:` blocks directly.
+#
+# `--inputs` JSON keys match the workflow's expression strings verbatim
+# (e.g. "needs.fetch-issue.outputs.title", "inputs.issue_number"). Each
+# `${{ expr }}` in env:/with: is resolved against that map.
 #
 # Usage: act-step-dispatch.sh <workflow> <step_id> [--inputs JSON] [--artifact-server-path PATH] [-q|--quiet]
 
@@ -37,49 +50,89 @@ if ! grep -q "^  $STEP_ID:" "$WF"; then
   exit 1
 fi
 
-# Resolve job's env: block. For each entry, if value is a ${{ expr }} literal,
-# look up expr (stripped of the `${{ }}` wrapper, trimmed) in INPUTS_JSON.
-# Otherwise use the literal value.
-while IFS= read -r -d '' entry; do
-  k="${entry%%=*}"
-  v="${entry#*=}"
-  [ -z "$k" ] && continue
-  if [[ "$v" =~ ^\$\{\{[[:space:]]*(.+)[[:space:]]*\}\}$ ]]; then
-    expr="${BASH_REMATCH[1]}"
-    expr="${expr#"${expr%%[![:space:]]*}"}"
-    expr="${expr%"${expr##*[![:space:]]}"}"
-    resolved=$(echo "$INPUTS_JSON" | jq -r --arg k "$expr" '.[$k] // ""')
-  else
-    resolved="$v"
-  fi
-  export "$k=$resolved"
-done < <(yq -j ".jobs[\"$STEP_ID\"].env // {} | to_entries[] | \"\(.key)=\(.value)\u0000\"" "$WF")
-
-RUN_BLOCKS=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.run != null) | .run" "$WF")
-if [ -z "$RUN_BLOCKS" ] || [ "$RUN_BLOCKS" = "null" ]; then
-  # Fallback: the job may delegate to a composite action via `uses:`. Follow
-  # the first local action ref (./.github/actions/<name>) and execute its
-  # script as if it were an inline run block. The job's env: (already exported
-  # above) becomes the composite action's input env, which action scripts
-  # expect per their contract.
-  ACTION_REF=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.uses != null) | .uses | select(startswith(\"./.github/actions/\"))" "$WF" | head -1)
-  if [ -n "$ACTION_REF" ] && [ "$ACTION_REF" != "null" ]; then
-    ACTION_DIR="${ACTION_REF#./}"
-    if [ -f "$ACTION_DIR/script.sh" ]; then
-      RUN_BLOCKS="bash $ACTION_DIR/script.sh"
-    else
-      echo "Error: composite action at $ACTION_DIR has no script.sh" >&2
-      exit 1
-    fi
-  else
-    echo "Error: No run steps found in job '$STEP_ID'" >&2
-    exit 1
-  fi
-fi
-
 mkdir -p "$ARTIFACT_PATH"
 export GITHUB_OUTPUT="$ARTIFACT_PATH/github_output.txt"
 : > "$GITHUB_OUTPUT"
+
+# Resolve a `${{ expr }}` literal against $INPUTS_JSON. If the value is not
+# a `${{ ... }}` wrapper, return it verbatim.
+resolve_expr() {
+  local v="$1"
+  if [[ "$v" =~ ^\$\{\{[[:space:]]*(.+)[[:space:]]*\}\}$ ]]; then
+    local expr="${BASH_REMATCH[1]}"
+    expr="${expr#"${expr%%[![:space:]]*}"}"
+    expr="${expr%"${expr##*[![:space:]]}"}"
+    echo "$INPUTS_JSON" | jq -r --arg k "$expr" '.[$k] // ""'
+  else
+    echo "$v"
+  fi
+}
+
+# Detect path (A): a `uses:` step pointing at ./.github/actions/<name>.
+ACTION_REF=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.uses != null) | .uses | select(startswith(\"./.github/actions/\"))" "$WF" | head -1)
+
+if [ -n "$ACTION_REF" ] && [ "$ACTION_REF" != "null" ]; then
+  # ----- Path (A): composite action -----
+  ACTION_DIR="${ACTION_REF#./}"
+  ACTION_YML="$ACTION_DIR/action.yml"
+  [ -f "$ACTION_YML" ] || { echo "Error: $ACTION_YML missing" >&2; exit 1; }
+
+  # GATE: load action.yml. Malformed YAML fails here.
+  yq '.' "$ACTION_YML" >/dev/null
+
+  # Index of the matching `uses:` step, used to select its `with:` block.
+  USES_IDX=$(yq -r "[.jobs[\"$STEP_ID\"].steps[] | .uses] | map(. == \"$ACTION_REF\") | index(true)" "$WF")
+
+  # Resolve each `with:` value against INPUTS_JSON; populate INPUTS[name]=value.
+  declare -A INPUTS
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    k="${line%%=*}"
+    v="${line#*=}"
+    INPUTS["$k"]="$(resolve_expr "$v")"
+  done < <(yq -r ".jobs[\"$STEP_ID\"].steps[$USES_IDX].with // {} | to_entries[] | \"\(.key)=\(.value)\"" "$WF")
+
+  export GITHUB_ACTION_PATH="$PWD/$ACTION_DIR"
+
+  # Walk runs.steps[]: substitute `${{ inputs.X }}` in env values, export, exec run.
+  step_count=$(yq -r '.runs.steps | length' "$ACTION_YML")
+  for i in $(seq 0 $((step_count - 1))); do
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      k="${line%%=*}"
+      v="${line#*=}"
+      while [[ "$v" =~ \$\{\{[[:space:]]*inputs\.([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\}\} ]]; do
+        name="${BASH_REMATCH[1]}"
+        v="${v//${BASH_REMATCH[0]}/${INPUTS[$name]:-}}"
+      done
+      export "$k=$v"
+    done < <(yq -r ".runs.steps[$i].env // {} | to_entries[] | \"\(.key)=\(.value)\"" "$ACTION_YML")
+
+    RUN=$(yq -r ".runs.steps[$i].run // \"\"" "$ACTION_YML")
+    [ -z "$RUN" ] && continue
+    if [ $QUIET -eq 1 ]; then
+      bash -c "$RUN" >/dev/null
+    else
+      bash -c "$RUN"
+    fi
+  done
+  exit 0
+fi
+
+# ----- Path (B): inline-run job -----
+# Resolve the job's `env:` block against INPUTS_JSON, export each entry.
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  k="${line%%=*}"
+  v="${line#*=}"
+  export "$k=$(resolve_expr "$v")"
+done < <(yq -r ".jobs[\"$STEP_ID\"].env // {} | to_entries[] | \"\(.key)=\(.value)\"" "$WF")
+
+RUN_BLOCKS=$(yq -r ".jobs[\"$STEP_ID\"].steps[] | select(.run != null) | .run" "$WF")
+if [ -z "$RUN_BLOCKS" ] || [ "$RUN_BLOCKS" = "null" ]; then
+  echo "Error: No run steps found in job '$STEP_ID'" >&2
+  exit 1
+fi
 
 if [ $QUIET -eq 1 ]; then
   bash -c "$RUN_BLOCKS" >/dev/null

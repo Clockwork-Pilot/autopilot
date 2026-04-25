@@ -31,31 +31,29 @@ jobs:
         run: |
           bash .github/scripts/test/act-step-dispatch.sh "${{ inputs.workflow }}" "${{ inputs.step_id }}" --inputs '${{ inputs.inputs_json }}' --artifact-server-path "${{ inputs.artifact_path }}"
 
-  # Composite-action test wrappers. Each job mirrors the env: shape of the
-  # original workflow job, so fixtures under .github/actions/<id>/fixtures/
-  # that key on expressions like "needs.fetch-issue.outputs.title" keep working
-  # when the test script targets `act-step-runner.yml <id>`. The run: step
-  # invokes the composite action's script directly (bypassing `uses:`), which
-  # is what act-step-dispatch.sh can execute.
+  # Composite-action test wrappers. Each job invokes the composite action via
+  # `uses: ./.github/actions/<id>` with `with:` expressions matching the fixture
+  # input.json keys (e.g. "needs.fetch-issue.outputs.title"). act-step-dispatch.sh
+  # resolves those expressions against --inputs, then drives the composite
+  # action through its action.yml — so action.yml metadata (inputs, outputs,
+  # env wiring) is exercised on every test run.
 
   parse-issue:
     runs-on: ubuntu-latest
-    env:
-      TITLE:        ${{ needs.fetch-issue.outputs.title }}
-      BODY_RAW:     ${{ needs.fetch-issue.outputs.body_raw }}
-      ISSUE_NUMBER: ${{ inputs.issue_number }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - run: bash .github/actions/parse-issue/script.sh
+      - uses: ./.github/actions/parse-issue
+        with:
+          title:        ${{ needs.fetch-issue.outputs.title }}
+          body_raw:     ${{ needs.fetch-issue.outputs.body_raw }}
+          issue_number: ${{ inputs.issue_number }}
 
   choose-branch:
     runs-on: ubuntu-latest
-    env:
-      PR_BRANCH:             ${{ needs.parse-issue.outputs.pr_branch }}
-      AGENT_BRANCH_DEFAULT:  ${{ needs.parse-issue.outputs.agent_branch_default }}
-      EXISTING_AGENT_BRANCH: ${{ needs.gather-repo-facts.outputs.existing_agent_branch }}
-      BASE_FROM_ISSUE:       ${{ needs.parse-issue.outputs.base_branch }}
-      DEFAULT_BRANCH:        ${{ needs.gather-repo-facts.outputs.default_branch }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - run: bash .github/actions/choose-branch/script.sh
+      - uses: ./.github/actions/choose-branch
+        with:
+          pr_branch:             ${{ needs.parse-issue.outputs.pr_branch }}
+          agent_branch_default:  ${{ needs.parse-issue.outputs.agent_branch_default }}
+          existing_agent_branch: ${{ needs.gather-repo-facts.outputs.existing_agent_branch }}
+          base_from_issue:       ${{ needs.parse-issue.outputs.base_branch }}
+          default_branch:        ${{ needs.gather-repo-facts.outputs.default_branch }}
