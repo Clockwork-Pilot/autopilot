@@ -134,25 +134,10 @@ The Dockerfile must satisfy the `autopilot-ws` runtime contract:
 
 ### Use it from the caller workflow
 
-Two shapes, pick whichever fits:
-
-**Inline (simple):** pass `dockerfile:` to `coding-agent.yml` directly; image preparation runs inside its `prepare-image` job.
+Hoist image preparation into its own visible job via `ensure-docker-image.yml`, then hand its output to `coding-agent.yml` via `docker_image:`. Both jobs must land on the same self-hosted runner (single runner per `runner_label` — the default single-user setup), since local docker tags don't cross daemons.
 
 ```yaml
 # your fork: .github/workflows/agent.yml
-jobs:
-  agent:
-    uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
-    with:
-      runner_label:     ${{ github.actor }}
-      issue_number:     ${{ github.event.issue.number }}
-      dockerfile:       Dockerfile.agent
-      tag_prefix:       ${{ github.repository }}-agent-img
-```
-
-**Hoisted (visible image job):** call `ensure-docker-image.yml` first, hand its output to `coding-agent.yml` via `docker_image:`. Preferred when you want the image-prep cache hit/miss visible at the caller level, or when you want to insert consumer-owned steps around it. Both jobs must land on the same self-hosted runner (single runner per `runner_label` — the default single-user setup).
-
-```yaml
 jobs:
   image:
     uses: clockwork-pilot/autopilot/.github/workflows/ensure-docker-image.yml@v1
@@ -172,19 +157,18 @@ jobs:
       docker_image: ${{ needs.image.outputs.docker_image }}
 ```
 
-See `autopilot-selftest` for both shapes dogfooded against this repo.
+See `autopilot-selftest` for this shape dogfooded against this repo.
 
 ### Overriding the base image
 
-Both reusable workflows accept a `base_image:` input (default `ghcr.io/clockwork-pilot/autopilot-ws:latest`). Set it when you want to point at a fork, a private mirror, or a pinned digest:
+`ensure-docker-image.yml`'s `base_image:` defaults conventionally to `ghcr.io/clockwork-pilot/autopilot-ws:latest` (as in the example above). Override it to point at a fork, a private mirror, or a pinned digest — the rest of the `with:` block stays the same:
 
 ```yaml
-uses: clockwork-pilot/autopilot/.github/workflows/coding-agent.yml@v1
-with:
-  base_image:       ghcr.io/your-org/autopilot-ws-mirror:v1.2.3
-  dockerfile:       Dockerfile.agent
-  tag_prefix:       ${{ github.repository }}-agent-img
-  ...
+  image:
+    uses: clockwork-pilot/autopilot/.github/workflows/ensure-docker-image.yml@v1
+    with:
+      base_image:       ghcr.io/your-org/autopilot-ws-mirror:v1.2.3
+      ...
 ```
 
 `base_image` is used both as the FROM contract when a Dockerfile is supplied, and as the image that gets pulled when no Dockerfile is supplied. The only built-in reference to `ghcr.io/clockwork-pilot/autopilot-ws` lives in this input's default — change it once per caller and the whole pipeline follows.

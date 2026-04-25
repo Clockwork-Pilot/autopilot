@@ -9,14 +9,13 @@ Workflow structure constraints for .github/workflows
 - [Overview](#overview)
 - [Features](#features)
     - [Feature: coding_agent_steps](#feature-coding_agent_steps)
+      - [coding_agent_inputs_minimal](#coding_agent_inputs_minimal)
       - [dispatcher_fails_on_missing_step](#dispatcher_fails_on_missing_step)
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
       - [choose_branch_via_action](#choose_branch_via_action)
-      - [fixtures_colocated_with_actions](#fixtures_colocated_with_actions)
       - [no_legacy_centralized_fixtures](#no_legacy_centralized_fixtures)
-      - [parse_digest_via_action](#parse_digest_via_action)
       - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
       - [open_upstream_pr_job_shape](#open_upstream_pr_job_shape)
@@ -40,6 +39,9 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - Entry point called identically by workflow and constraint
 
+#### coding_agent_inputs_minimal
+**Description:** Architectural: coding-agent.yml workflow_call.inputs must equal exactly {runner_label, issue_number, docker_image, extra_docker_args}, with docker_image required. Locks in the post-cleanup interface and forbids the legacy internal-prep inputs (base_image, agent_image, dockerfile, build_args, tag_prefix) — callers must hoist image preparation via ensure-docker-image.yml.
+
 #### dispatcher_fails_on_missing_step
 **Description:** Negative: act-step-dispatch.sh must exit non-zero AND emit the missing-step error to stderr (not stdout) when the requested step does not exist
 
@@ -61,14 +63,8 @@ Workflow structure constraints for .github/workflows
 #### choose_branch_via_action
 **Description:** Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.
 
-#### fixtures_colocated_with_actions
-**Description:** Structural: each behaviorally tested composite action must own its fixtures under .github/actions/<step>/fixtures/. Co-locating fixtures next to action.yml/script.sh keeps them discoverable when modifying the action and prevents drift back to a centralized scripts/test tree.
-
 #### no_legacy_centralized_fixtures
 **Description:** Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.
-
-#### parse_digest_via_action
-**Description:** Behavioral: parse-digest fixtures pass against the act-step-runner.yml wrapper. Replaces parse_digest_cases.
 
 #### parse_issue_via_action
 **Description:** Behavioral: parse-issue fixtures pass against the act-step-runner.yml wrapper which invokes .github/actions/parse-issue/script.sh. Replaces parse_issue_cases after refactor to composite action.

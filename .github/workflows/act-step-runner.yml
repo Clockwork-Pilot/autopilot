@@ -59,12 +59,3 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: bash .github/actions/choose-branch/script.sh
-
-  parse-digest:
-    runs-on: ubuntu-latest
-    env:
-      MANIFEST_JSON: ${{ needs.fetch-manifest.outputs.manifest_json }}
-      IMAGE_REPO:    ${{ inputs.image_repo }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - run: bash .github/actions/parse-digest/script.sh

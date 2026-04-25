@@ -1,4 +1,0 @@
-{
-  "needs.fetch-manifest.outputs.manifest_json": "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.docker.distribution.manifest.list.v2+json\",\"manifests\":[{\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"platform\":{\"architecture\":\"amd64\",\"os\":\"linux\"}},{\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"}}]}",
-  "inputs.image_repo": "ghcr.io/test/repo"
-}

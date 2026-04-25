@@ -15,58 +15,13 @@ on:
         description: Issue number to work on
         required: true
         type: string
-      base_image:
-        description: |
-          Autopilot-ws-compatible runtime image (USER node, tools on PATH). Used
-          by the internal image-digest job to resolve a digest-pinned ref, and
-          as the build FROM contract when a Dockerfile is supplied. Required —
-          consumers supply this so autopilot has no built-in coupling to any
-          specific registry ref. Not used when `docker_image` is set.
-        required: true
-        type: string
       docker_image:
         description: |
-          Pre-built local docker tag to use as-is. When set, prepare-image skips
-          ensure-docker-image entirely and hands this ref to run-agent. Intended
-          for consumers who hoist image preparation into a separate job via
-          ensure-docker-image.yml. Requires that upstream job and this workflow's
-          self-hosted jobs to land on the SAME runner (local tags don't cross
-          docker daemons). Mutually exclusive with `dockerfile:` — when set,
-          dockerfile/build_args/tag_prefix are ignored.
-        required: false
+          Pre-built local docker tag handed straight to run-agent. Consumers
+          hoist image preparation into a separate job via ensure-docker-image.yml
+          on the same self-hosted runner (local tags don't cross docker daemons).
+        required: true
         type: string
-        default: ""
-      agent_image:
-        description: |
-          Override base image with a specific tag or digest (fallback path, used
-          when docker_image is unset). If unset, resolves the latest digest of
-          `base_image` via the image-digest job.
-        required: false
-        type: string
-        default: ""
-      dockerfile:
-        description: |
-          Optional Dockerfile path (fallback path, used when docker_image is unset).
-          Must FROM an autopilot-ws-compatible base (USER node). When set, prepare-image
-          builds via ensure-docker-image.
-        required: false
-        type: string
-        default: ""
-      build_args:
-        description: Newline-separated KEY=VALUE build args, forwarded to ensure-docker-image.
-        required: false
-        type: string
-        default: ""
-      tag_prefix:
-        description: |
-          Project tag/cache namespace used when prepare-image builds internally.
-          Required when `docker_image` is unset; ignored when `docker_image` is set.
-          See .github/actions/ensure-docker-image/README.md for the dual role
-          (tag partition + Buildx GHA cache scope).
-          Use e.g. `<owner>/<repo>-agent-img` (i.e. github.repository + a suffix).
-        required: false
-        type: string
-        default: ""
       extra_docker_args:
         description: Extra args spliced into `docker run` for the agent + constraint containers (forwarded as CLAUDE_EXTRA_DOCKER_ARGS).
         required: false
@@ -194,68 +149,8 @@ jobs:
           base_from_issue:       ${{ needs.parse-issue.outputs.base_branch }}
           default_branch:        ${{ needs.gather-repo-facts.outputs.default_branch }}
 
-  # Always runs (cheap: one `docker manifest inspect` call). Its output is
-  # ignored when inputs.agent_image is set — prepare-image picks the override
-  # in that case. Keeping it unconditional means every downstream job can rely
-  # on the default success() gate instead of custom skip-tolerant conditions.
-  image-digest:
-    uses: Clockwork-Pilot/autopilot/.github/workflows/image-digest.yml@main
-    with:
-      image_repo: ${{ inputs.base_image }}
-
-  # Resolves the image for run-agent. Two modes:
-  #   - docker_image set → short-circuit, echo it back (consumer pre-built via
-  #     ensure-docker-image.yml on the same runner).
-  #   - docker_image unset → run ensure-docker-image internally, using dockerfile
-  #     if supplied or just pulling autopilot-ws otherwise.
-  prepare-image:
-    needs: [validate-runner, image-digest]
-    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
-    outputs:
-      image: ${{ steps.resolve.outputs.image }}
-    steps:
-      - name: Validate inputs
-        if: inputs.docker_image == '' && inputs.tag_prefix == ''
-        run: |
-          echo "::error::tag_prefix is required when docker_image is unset"
-          exit 1
-
-      - name: Short-circuit to pre-built image
-        id: passthrough
-        if: inputs.docker_image != ''
-        env:
-          DOCKER_IMAGE: ${{ inputs.docker_image }}
-        run: echo "image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout caller repo (for Dockerfile access)
-        if: inputs.docker_image == '' && inputs.dockerfile != ''
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Build or pull image internally
-        id: internal
-        if: inputs.docker_image == ''
-        uses: Clockwork-Pilot/autopilot/.github/actions/ensure-docker-image@main
-        with:
-          dockerfile:       ${{ inputs.dockerfile }}
-          build_args:       ${{ inputs.build_args }}
-          base_image:       ${{ inputs.agent_image != '' && inputs.agent_image || needs.image-digest.outputs.image }}
-          tag:              autopilot-agent
-          tag_prefix:       ${{ inputs.tag_prefix }}
-
-      - name: Resolve final image ref
-        id: resolve
-        env:
-          PASSTHROUGH: ${{ steps.passthrough.outputs.image }}
-          INTERNAL:    ${{ steps.internal.outputs.image }}
-        run: |
-          if [ -n "$PASSTHROUGH" ]; then
-            echo "image=$PASSTHROUGH" >> "$GITHUB_OUTPUT"
-          else
-            echo "image=$INTERNAL"    >> "$GITHUB_OUTPUT"
-          fi
-
   run-agent:
-    needs: [validate-runner, fetch-issue, parse-issue, choose-branch, image-digest, prepare-image]
+    needs: [validate-runner, fetch-issue, parse-issue, choose-branch]
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     outputs:
       has_new_commit:  ${{ steps.detect-new-commit.outputs.has_new_commit }}
@@ -294,10 +189,10 @@ jobs:
           mkdir -p "$DOCKER_FILES/.credentials" "$DOCKER_FILES/.cargo" "$DOCKER_FILES/.local"
           [ -s "$DOCKER_FILES/.claude.local.json" ] || printf '{}\n' > "$DOCKER_FILES/.claude.local.json"
 
-      # Image is either (a) locally built by prepare-image, or (b) a registry
-      # ref. docker run will pull (b) lazily; (a) is already present. If the
-      # consumer's base_image/agent_image is private, they must configure a
-      # docker login step earlier in their own caller workflow.
+      # `inputs.docker_image` is a local tag the consumer prepared via
+      # ensure-docker-image on the same self-hosted runner. If the consumer's
+      # base image is private, they must configure a docker login step in
+      # their own caller workflow before ensure-docker-image runs.
 
       - name: Run Claude agent in Docker
         id: agent
@@ -305,7 +200,7 @@ jobs:
           MODEL:        ${{ needs.parse-issue.outputs.model }}
           TIMEOUT_SECS: ${{ needs.parse-issue.outputs.timeout_secs }}
           PROMPT:       ${{ needs.parse-issue.outputs.agent_task_text }}
-          AGENT_IMAGE:  ${{ needs.prepare-image.outputs.image }}
+          AGENT_IMAGE:  ${{ inputs.docker_image }}
           CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
           echo "::group::Claude Agent Output"
@@ -320,7 +215,7 @@ jobs:
         id: constraints
         if: always()
         env:
-          AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+          AGENT_IMAGE: ${{ inputs.docker_image }}
           CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
           # stdout → issue comment; exit code gates the commit step.
@@ -356,7 +251,7 @@ jobs:
         env:
           MODEL:       ${{ needs.parse-issue.outputs.model }}
           PROMPT:      commit changes
-          AGENT_IMAGE: ${{ needs.prepare-image.outputs.image }}
+          AGENT_IMAGE: ${{ inputs.docker_image }}
           CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: bash .github/scripts/run-in-docker-claude.sh --allow-git-commit || true
 
