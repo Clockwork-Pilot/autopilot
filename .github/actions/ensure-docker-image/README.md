@@ -13,6 +13,41 @@ Two paths, selected by whether you pass a `dockerfile`:
 
 Fast path (both modes): if a local image with the computed content-hashed tag already exists, the build/pull step is skipped entirely.
 
+## Flow
+
+```mermaid
+flowchart TD
+    Start([caller invokes action<br/>inputs: dockerfile, base_image,<br/>tag, tag_prefix, build_args])
+    Start --> Env["env: detect is_self_hosted<br/>from runner.environment"]
+    Env --> Base["base: BASE_DIGEST =<br/>sha256(docker manifest inspect $base_image)<br/>fallback: docker pull, then read ID"]
+    Base --> Key["key: compute HASH and TAG<br/>HASH = base-DIGEST&nbsp;&nbsp;(dockerfile unset)<br/>HASH = DF-DIGEST-ARGS&nbsp;&nbsp;(dockerfile set)<br/>TAG = tag:safe_prefix-HASH<br/>build_scope = safe_prefix-buildimg<br/>pull_cache_key = safe_prefix-pullimg-DIGEST"]
+    Key --> Local{"local: docker image<br/>inspect TAG?"}
+    Local -- hit --> Finalize
+    Local -- miss --> Route{dockerfile set?}
+
+    Route -- "no (PATH A: pull)" --> PullEnv{self-hosted?}
+    Route -- "yes (PATH B: build)" --> BuildEnv{self-hosted?}
+
+    PullEnv -- "no (hosted)" --> PullCacheTry["actions/cache restore<br/>key: pull_cache_key<br/>path: /tmp/ensure-docker-image.tar"]
+    PullEnv -- "yes" --> PullSelf["docker pull base_image<br/>docker tag → TAG<br/>(daemon layer cache)"]
+    PullCacheTry -- hit --> Load["docker load &lt; tar<br/>retag to TAG if needed"]
+    PullCacheTry -- miss --> PullHosted["docker pull base_image<br/>docker tag → TAG<br/>docker save → /tmp tar<br/>(written back to GHA cache)"]
+
+    BuildEnv -- "no (hosted)" --> BuildHosted["setup-buildx<br/>build-push-action<br/>cache-from/to: type=gha,<br/>scope=build_scope<br/>load: true"]
+    BuildEnv -- "yes" --> BuildSelf["setup-buildx<br/>build-push-action<br/>load: true<br/>(daemon layer cache only)"]
+
+    Load --> Finalize
+    PullHosted --> Finalize
+    PullSelf --> Finalize
+    BuildHosted --> Finalize
+    BuildSelf --> Finalize
+
+    Finalize["finalize: docker inspect TAG → digest<br/>outputs: image, cache_hit, digest"]
+    Finalize --> End([caller receives image tag])
+```
+
+The reusable workflow `.github/workflows/ensure-docker-image.yml` is a thin wrapper that runs this composite on `[self-hosted, runner_label]` and surfaces `outputs.docker_image` to the caller workflow — useful when the prepared image must be handed to a downstream reusable workflow on the same runner.
+
 ## Inputs
 
 | Input | Required | Default | Description |
