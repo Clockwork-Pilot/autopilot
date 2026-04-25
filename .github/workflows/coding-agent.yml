@@ -284,21 +284,15 @@ jobs:
             echo "EOF_COMMIT_BODY"
           } >> "$GITHUB_OUTPUT"
 
-  # Fork-PR creation and issue commenting split off the self-hosted runner.
-  # Only needs GITHUB_TOKEN; does not require the agent runner or Docker.
+  # Fork-PR creation, split off the self-hosted runner. Only runs in same-repo
+  # mode (merge_into_upstream != 'true') and only when the agent actually
+  # committed. Green = a PR was opened.
   open-pr:
     needs: [fetch-issue, parse-issue, choose-branch, run-agent]
-    # Handles: (a) fork-PR flow end-to-end, and (b) issue commenting for the
-    # upstream-no-commit case (where open-upstream-pr is gated off). The
-    # upstream-with-commit case is owned by open-upstream-pr.
-    if: |
-      always() && needs.run-agent.result != 'skipped' && needs.run-agent.result != 'cancelled'
-      && (needs.parse-issue.outputs.merge_into_upstream != 'true'
-          || needs.run-agent.outputs.has_new_commit != 'true')
+    if: needs.run-agent.outputs.has_new_commit == 'true' && needs.parse-issue.outputs.merge_into_upstream != 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      issues: write
     steps:
       - name: Check out repo (for composite actions)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -306,7 +300,6 @@ jobs:
           persist-credentials: false
 
       - name: Open PR inside fork
-        if: needs.run-agent.outputs.has_new_commit == 'true' && needs.parse-issue.outputs.merge_into_upstream != 'true'
         uses: Clockwork-Pilot/autopilot/.github/actions/create-pr@main
         with:
           gh-token:    ${{ secrets.GITHUB_TOKEN }}
@@ -315,16 +308,6 @@ jobs:
           pr-title:    ${{ needs.fetch-issue.outputs.title }}
           issue-ref:   ${{ github.repository }}#${{ inputs.issue_number }}
           commit-body: ${{ needs.run-agent.outputs.commit_msg }}
-
-      - name: Comment agent result on issue
-        uses: Clockwork-Pilot/autopilot/.github/actions/comment-agent-result@main
-        with:
-          gh-token:        ${{ secrets.GITHUB_TOKEN }}
-          repo:            ${{ github.repository }}
-          issue-number:    ${{ inputs.issue_number }}
-          constraints-md:  ${{ needs.run-agent.outputs.constraints_md }}
-          has-new-commit:  ${{ needs.run-agent.outputs.has_new_commit }}
-          agent-exit-code: ${{ needs.run-agent.outputs.agent_exit_code }}
 
   # Cross-repo PR from fork → upstream. Isolated on a GitHub-hosted runner so
   # UPSTREAM_PR_TOKEN never enters the self-hosted agent job. The `upstream-pr`
@@ -337,7 +320,6 @@ jobs:
     environment: upstream-pr
     permissions:
       contents: read
-      issues: write
     steps:
       - name: Check out repo (for composite actions)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -371,6 +353,21 @@ jobs:
           pr-title:    ${{ needs.fetch-issue.outputs.title }}
           issue-ref:   ${{ github.repository }}#${{ inputs.issue_number }}
           commit-body: ${{ needs.run-agent.outputs.commit_msg }}
+
+  # Issue commenting, decoupled from PR creation. Always runs when the agent
+  # ran (success or failure), independent of whether a PR was opened. Green =
+  # the issue got the result comment.
+  comment-on-issue:
+    needs: [run-agent]
+    if: always() && needs.run-agent.result != 'skipped' && needs.run-agent.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Check out repo (for composite actions)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
 
       - name: Comment agent result on issue
         uses: Clockwork-Pilot/autopilot/.github/actions/comment-agent-result@main
