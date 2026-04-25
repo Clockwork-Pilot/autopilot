@@ -44,7 +44,7 @@ RUN=(timeout "$TIMEOUT_SECS" docker run --rm
   ${CLAUDE_EXTRA_DOCKER_ARGS:-}
   "$AGENT_IMAGE"
   bash -c '
-    /workspace/.github/scripts/tail-hooks-log.sh "$CLAUDE_HOOKS_LOG_FILE" &
+    /docker-scripts/tail-hooks-log.sh "$CLAUDE_HOOKS_LOG_FILE" &
     TAIL_PID=$!
     trap "kill $TAIL_PID 2>/dev/null || true" EXIT
     source /docker-scripts/user-entrypoint.sh

@@ -209,7 +209,7 @@ jobs:
           EXIT_CODE=$?
           echo "::endgroup::"
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-          set -e
+          exit "$EXIT_CODE"
 
       - name: Run constraint checks
         id: constraints
@@ -218,7 +218,8 @@ jobs:
           AGENT_IMAGE: ${{ inputs.docker_image }}
           CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
-          # stdout → issue comment; exit code gates the commit step.
+          # stdout → issue comment; exit code gates the commit step and
+          # propagates to the job result (red on constraint failure).
           set +e
           # Re-display the constraint report the in-container agent already
           # produced (spec-checks.k.json on disk). --dry-run loads that file
@@ -227,8 +228,8 @@ jobs:
             '$PLUGIN_ROOT/bin/check --dry-run --full-report' \
             > /tmp/constraints.md 2>&1
           EXIT_CODE=$?
-          set -e
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit "$EXIT_CODE"
 
       - name: Export constraints report as job output
         id: constraints-out
