@@ -204,33 +204,29 @@ jobs:
           timeout_secs:      ${{ needs.parse-issue.outputs.timeout_secs }}
           extra_docker_args: ${{ inputs.extra_docker_args }}
 
+      # Re-displays the constraint report the in-container agent already
+      # produced (spec-checks.k.json on disk). --dry-run loads that file
+      # and prints the report without re-running any constraint `cmd`.
+      # stdout → issue comment; exit code gates the commit step and
+      # propagates to the job result (red on constraint failure).
       - name: Run constraint checks
         id: constraints
         if: always()
-        env:
-          AGENT_IMAGE: ${{ inputs.docker_image }}
-          EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
-        run: |
-          # stdout → issue comment; exit code gates the commit step and
-          # propagates to the job result (red on constraint failure).
-          set +e
-          # Re-display the constraint report the in-container agent already
-          # produced (spec-checks.k.json on disk). --dry-run loads that file
-          # and prints the report without re-running any constraint `cmd`.
-          bash .github/scripts/run-in-docker-no-agent.sh \
-            '$PLUGIN_ROOT/bin/check --dry-run --full-report' \
-            > /tmp/constraints.md 2>&1
-          EXIT_CODE=$?
-          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-          exit "$EXIT_CODE"
+        uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@main
+        with:
+          image:             ${{ inputs.docker_image }}
+          command:           $PLUGIN_ROOT/bin/check --dry-run --full-report
+          extra_docker_args: ${{ inputs.extra_docker_args }}
 
       - name: Export constraints report as job output
         id: constraints-out
         if: always()
+        env:
+          BODY: ${{ steps.constraints.outputs.body }}
         run: |
           {
             echo "body<<EOF_CONSTRAINTS_BODY"
-            cat /tmp/constraints.md 2>/dev/null || echo "(no constraints report produced)"
+            printf '%s\n' "${BODY:-(no constraints report produced)}"
             echo "EOF_CONSTRAINTS_BODY"
           } >> "$GITHUB_OUTPUT"
 

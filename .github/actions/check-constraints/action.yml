@@ -14,13 +14,34 @@ inputs:
     required: false
     default: ""
 
+outputs:
+  exit_code:
+    description: Exit code of the in-container command.
+    value: ${{ steps.run.outputs.exit_code }}
+  body:
+    description: Stdout+stderr of the in-container command (the constraint report).
+    value: ${{ steps.run.outputs.body }}
+
 runs:
   using: composite
   steps:
     - name: Run check inside image
+      id: run
       shell: bash
       env:
         AGENT_IMAGE: ${{ inputs.image }}
         CMD: ${{ inputs.command }}
         EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
-      run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-agent.sh" "$CMD"
+      run: |
+        set +e
+        OUT=$(mktemp)
+        bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-agent.sh" "$CMD" > "$OUT" 2>&1
+        EXIT_CODE=$?
+        cat "$OUT"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        {
+          echo "body<<EOF_CONSTRAINTS_BODY"
+          cat "$OUT"
+          echo "EOF_CONSTRAINTS_BODY"
+        } >> "$GITHUB_OUTPUT"
+        exit "$EXIT_CODE"
