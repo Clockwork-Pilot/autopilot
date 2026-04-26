@@ -25,8 +25,10 @@ Apply an `agent-run` label to a GitHub issue → the agent runs against a dedica
    ```
    ---
    timeout: 20                  # minutes, default 10
-   model: <model-id>            # default set in parse-issue
+   model: <model-id>            # default claude-haiku-4-5
    merge_into_upstream: false   # default false — see below
+   pr_branch: <branch>          # default agent/<issue-number>-<title-slug>
+   base_branch: <branch>        # default repo's default branch
    ---
    <describe feature and its constraints>
    ```
