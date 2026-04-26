@@ -1,0 +1,139 @@
+name: Ensure Image (self-hosted runner)
+description: |
+  Prepare a local docker image tag on a self-hosted runner. The docker daemon's
+  persistent layer cache is reused across runs, so no external GHA cache is
+  needed. Idempotent: if a local tag with the computed content hash already
+  exists, build/pull is skipped entirely.
+
+  Two paths:
+    - dockerfile unset  → pulls `base_image`, tags it locally.
+    - dockerfile set    → builds the Dockerfile on top of `base_image`.
+
+  Use this action when `runs-on: [self-hosted, ...]`.
+  For GitHub-hosted runners use ensure-image-hosted instead.
+
+inputs:
+  dockerfile:
+    description: Path to the Dockerfile, relative to $GITHUB_WORKSPACE. Leave empty to only pull+tag `base_image`.
+    required: false
+    default: ""
+  context:
+    description: Build context directory, relative to $GITHUB_WORKSPACE. Only used when `dockerfile` is set.
+    required: false
+    default: "."
+  build_args:
+    description: Newline-separated KEY=VALUE build args, forwarded to the builder. Included in the content hash, so a change invalidates the local tag.
+    required: false
+    default: ""
+  base_image:
+    description: Image reference to pull and tag locally, and the FROM contract for any Dockerfile.
+    required: true
+  tag_prefix:
+    description: |
+      REQUIRED. Project namespace. The produced local tag is `<tag_prefix>:<hash>`,
+      so this is what `docker images` shows in the REPOSITORY column. Multiple
+      projects sharing one daemon (typical on a per-user self-hosted runner) keep
+      their tags partitioned because each project picks a distinct prefix.
+    required: true
+
+outputs:
+  image:
+    description: Fully qualified local tag of the produced image.
+    value: ${{ steps.finalize.outputs.image }}
+  cache_hit:
+    description: '"true" if the local tag pre-existed and neither build nor pull ran.'
+    value: ${{ steps.finalize.outputs.cache_hit }}
+  digest:
+    description: Local image ID (sha256) of the produced image.
+    value: ${{ steps.finalize.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - id: base
+      shell: bash
+      env:
+        BASE: ${{ inputs.base_image }}
+      run: |
+        set -euo pipefail
+        DIGEST=$(docker manifest inspect "$BASE" 2>/dev/null | sha256sum | cut -c1-16) || DIGEST=""
+        if [ -z "$DIGEST" ]; then
+          docker pull "$BASE" >/dev/null
+          DIGEST=$(docker inspect --format='{{.Id}}' "$BASE" | sed 's/^sha256://' | cut -c1-16)
+        fi
+        echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+    - id: key
+      shell: bash
+      env:
+        DOCKERFILE:  ${{ inputs.dockerfile }}
+        BUILD_ARGS:  ${{ inputs.build_args }}
+        BASE_DIGEST: ${{ steps.base.outputs.digest }}
+        PREFIX:      ${{ inputs.tag_prefix }}
+      run: |
+        set -euo pipefail
+        if [ -z "$PREFIX" ]; then
+          echo "::error::tag_prefix is required"
+          exit 1
+        fi
+        SAFE_PREFIX=$(printf '%s' "$PREFIX" | tr '/ ' '__' | tr '[:upper:]' '[:lower:]')
+        if [ -z "$DOCKERFILE" ]; then
+          HASH="base-${BASE_DIGEST}"
+        else
+          DF_HASH=$(sha256sum "$DOCKERFILE" | cut -c1-16)
+          ARG_HASH=$(printf '%s' "$BUILD_ARGS" | sha256sum | cut -c1-16)
+          HASH="${DF_HASH}-${BASE_DIGEST}-${ARG_HASH}"
+        fi
+        echo "tag=${SAFE_PREFIX}:${HASH}" >> "$GITHUB_OUTPUT"
+
+    - id: local
+      shell: bash
+      env:
+        TAG: ${{ steps.key.outputs.tag }}
+      run: |
+        if docker image inspect "$TAG" >/dev/null 2>&1; then
+          echo "hit=true"  >> "$GITHUB_OUTPUT"
+        else
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # PATH A — pull+tag base
+    - name: Pull base image
+      if: inputs.dockerfile == '' && steps.local.outputs.hit != 'true'
+      shell: bash
+      env:
+        BASE: ${{ inputs.base_image }}
+        TAG:  ${{ steps.key.outputs.tag }}
+      run: |
+        set -euo pipefail
+        docker pull "$BASE"
+        docker tag "$BASE" "$TAG"
+
+    # PATH B — build Dockerfile on top of base
+    - if: inputs.dockerfile != '' && steps.local.outputs.hit != 'true'
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+    - name: Build with daemon layer cache
+      if: inputs.dockerfile != '' && steps.local.outputs.hit != 'true'
+      uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
+      with:
+        context:    ${{ inputs.context }}
+        file:       ${{ inputs.dockerfile }}
+        build-args: ${{ inputs.build_args }}
+        tags:       ${{ steps.key.outputs.tag }}
+        load:       true
+        push:       false
+
+    - id: finalize
+      shell: bash
+      env:
+        TAG:       ${{ steps.key.outputs.tag }}
+        LOCAL_HIT: ${{ steps.local.outputs.hit }}
+      run: |
+        set -euo pipefail
+        DIGEST=$(docker inspect --format='{{.Id}}' "$TAG")
+        {
+          echo "image=$TAG"
+          echo "cache_hit=$LOCAL_HIT"
+          echo "digest=$DIGEST"
+        } >> "$GITHUB_OUTPUT"
