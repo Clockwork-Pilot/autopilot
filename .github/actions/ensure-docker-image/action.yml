@@ -53,7 +53,7 @@ inputs:
           and a single project's edits still hit per-layer reuse.
       Pick something short and project-specific (e.g. `agent-img`,
       `check-img`). Distinct projects MUST use distinct prefixes. Including
-      `${{ github.repository }}` is a defensive convention for templates
+      `github.repository` is a defensive convention for templates
       copy-pasted across many repos, but a hand-picked unique name is
       equivalent. No default: omitting this is a usage error.
     required: true
