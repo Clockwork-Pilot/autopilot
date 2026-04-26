@@ -22,7 +22,14 @@ PROXY_WRAPPER=(-e PROXY_WRAPPER_CONFIG=/docker-scripts/proxy_wrapper_config.json
 
 export CLAUDE_HOOKS_LOG_FILE=/home/node/.claude/hooks.log
 
-RUN=(timeout "$TIMEOUT_SECS" docker run --rm
+# Capture the container id so we can `docker kill` it on cancellation. Without
+# this, GitHub's cancel signal kills the runner step but the docker daemon
+# keeps the container running, so the agent finishes its turn anyway.
+# `timeout --foreground` propagates signals to `docker run`.
+CIDFILE=$(mktemp -u)
+trap 'CID=$(cat "$CIDFILE" 2>/dev/null || true); [ -n "$CID" ] && docker kill "$CID" >/dev/null 2>&1 || true; rm -f "$CIDFILE"' EXIT INT TERM
+
+RUN=(timeout --foreground "$TIMEOUT_SECS" docker run --rm --cidfile "$CIDFILE"
   -e AGENT_FILE_ACCESS_RULES=/docker-scripts/y2-plugin-deny-file-rules.json
   -e CLAUDE_HOOKS_LOG_FILE
   "${PROXY_WRAPPER[@]}"

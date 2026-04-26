@@ -222,6 +222,27 @@
           "fails_count": 1
         }
       }
+    },
+    "runner_cancellation": {
+      "type": "Feature",
+      "model_version": 1,
+      "id": "runner_cancellation",
+      "description": "Self-hosted runner must propagate GitHub workflow cancellation into the docker container, not orphan it.",
+      "goals": [
+        "When GitHub cancels a workflow, the in-flight docker container must be killed, not left running.",
+        "Without this, `docker run --rm` orphans the container \u2014 the daemon keeps it alive after the runner step is killed, so the agent finishes its turn anyway and consumes credits/produces side effects on a cancelled run."
+      ],
+      "depends_on": [
+        "docker_environment"
+      ],
+      "constraints": {
+        "docker_run_scripts_kill_container_on_cancel": {
+          "id": "docker_run_scripts_kill_container_on_cancel",
+          "cmd": "for f in \"$PROJECT_ROOT\"/.github/scripts/run-in-docker-claude.sh \"$PROJECT_ROOT\"/.github/scripts/run-in-docker-no-agent.sh; do grep -q -- '--cidfile' \"$f\" || { echo \"$f: docker run must pass --cidfile so the container id can be captured for kill-on-cancel\"; exit 1; }; grep -qE '^[[:space:]]*trap[[:space:]].*docker kill.*EXIT[[:space:]]+INT[[:space:]]+TERM' \"$f\" || { echo \"$f: must install a trap on EXIT INT TERM that runs docker kill (otherwise GitHub cancellation orphans the container)\"; exit 1; }; done",
+          "description": "Both run-in-docker-*.sh scripts must capture the container id via `docker run --cidfile <file>` and install a `trap '... docker kill ...' EXIT INT TERM` so GitHub workflow cancellation actually stops the container. Without --cidfile + trap, `docker run --rm` orphans the container: the docker daemon keeps it running after the runner step is killed, the agent finishes its turn anyway, and the cancelled run still consumes credits and writes side effects.",
+          "fails_count": 1
+        }
+      }
     }
   }
 }

@@ -13,6 +13,8 @@ Workflow structure constraints for .github/workflows
       - [dispatcher_fails_on_missing_step](#dispatcher_fails_on_missing_step)
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
+    - [Feature: runner_cancellation](#feature-runner_cancellation)
+      - [docker_run_scripts_kill_container_on_cancel](#docker_run_scripts_kill_container_on_cancel)
     - [Feature: step_output_checks](#feature-step_output_checks)
       - [act_step_runner_choose_branch_job_uses_composite_action](#act_step_runner_choose_branch_job_uses_composite_action)
       - [act_step_runner_parse_issue_job_uses_composite_action](#act_step_runner_parse_issue_job_uses_composite_action)
@@ -61,6 +63,16 @@ Workflow structure constraints for .github/workflows
 
 #### docker_required
 **Description:** Verify constraints are running inside an existing Docker container (/.dockerenv present). We are already in Docker — do not nest another container layer.
+
+### Feature: runner_cancellation
+**Self-hosted runner must propagate GitHub workflow cancellation into the docker container, not orphan it.**
+
+**Goals:**
+- When GitHub cancels a workflow, the in-flight docker container must be killed, not left running.
+- Without this, `docker run --rm` orphans the container — the daemon keeps it alive after the runner step is killed, so the agent finishes its turn anyway and consumes credits/produces side effects on a cancelled run.
+
+#### docker_run_scripts_kill_container_on_cancel
+**Description:** Both run-in-docker-*.sh scripts must capture the container id via `docker run --cidfile <file>` and install a `trap '... docker kill ...' EXIT INT TERM` so GitHub workflow cancellation actually stops the container. Without --cidfile + trap, `docker run --rm` orphans the container: the docker daemon keeps it running after the runner step is killed, the agent finishes its turn anyway, and the cancelled run still consumes credits and writes side effects.
 
 ### Feature: step_output_checks
 **Behavioral checks: dispatch a workflow step with a fixture input and assert its $GITHUB_OUTPUT matches fixture.**

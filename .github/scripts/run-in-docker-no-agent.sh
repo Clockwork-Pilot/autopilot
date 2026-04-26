@@ -20,7 +20,13 @@ if command -v docker >/dev/null 2>&1; then
   # mount and breaking subsequent host-side post-steps (actions/checkout
   # cleanup, cache restores, artifact uploads — all fail with EPERM on
   # locking .git/config and friends).
-  docker run --rm \
+  #
+  # Capture the container id so we can `docker kill` it on cancellation.
+  # Without this, GitHub's cancel signal kills the runner step but the
+  # docker daemon keeps the container running.
+  CIDFILE=$(mktemp -u)
+  trap 'CID=$(cat "$CIDFILE" 2>/dev/null || true); [ -n "$CID" ] && docker kill "$CID" >/dev/null 2>&1 || true; rm -f "$CIDFILE"' EXIT INT TERM
+  docker run --rm --cidfile "$CIDFILE" \
     -e "HOST_UID=$(id -u)" \
     -e "HOST_GID=$(id -g)" \
     -v "$GITHUB_WORKSPACE:/workspace" \
