@@ -118,8 +118,6 @@ jobs:
 
 **Properties.** Build runs as root (apt/pip/`/usr/local/bin` writes work). Build context is the caller's checkout (`COPY pyproject.toml` etc. works). Caching: GHA layer cache on hosted runners (scoped by `tag_prefix`), local docker cache on self-hosted. Fast-path: if the content-hashed local tag exists, build is skipped. No registry required.
 
-For images shared across many repos or pinned by digest, build & push to your own registry — see [`templates/user-image/`](templates/user-image/) for a copy-ready Dockerfile + push workflow. Then set `agent_image:` (instead of `dockerfile:`) on the caller. Private images need a `docker login ghcr.io` step before the `uses:` line.
-
 ## Opening PRs against the upstream repo (optional)
 
 Set `merge_into_upstream: true` in the issue frontmatter to open the PR against the parent repo instead of your fork.
