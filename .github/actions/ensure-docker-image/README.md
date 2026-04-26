@@ -17,10 +17,10 @@ Fast path (both modes): if a local image with the computed content-hashed tag al
 
 ```mermaid
 flowchart TD
-    Start([caller invokes action<br/>inputs: dockerfile, base_image,<br/>tag, tag_prefix, build_args])
+    Start([caller invokes action<br/>inputs: dockerfile, base_image,<br/>tag_prefix, build_args])
     Start --> Env["env: detect is_self_hosted<br/>from runner.environment"]
     Env --> Base["base: BASE_DIGEST =<br/>sha256(docker manifest inspect $base_image)<br/>fallback: docker pull, then read ID"]
-    Base --> Key["key: compute HASH and TAG<br/>HASH = base-DIGEST&nbsp;&nbsp;(dockerfile unset)<br/>HASH = DF-DIGEST-ARGS&nbsp;&nbsp;(dockerfile set)<br/>TAG = tag:safe_prefix-HASH<br/>build_scope = safe_prefix-buildimg<br/>pull_cache_key = safe_prefix-pullimg-DIGEST"]
+    Base --> Key["key: compute HASH and TAG<br/>HASH = base-DIGEST&nbsp;&nbsp;(dockerfile unset)<br/>HASH = DF-DIGEST-ARGS&nbsp;&nbsp;(dockerfile set)<br/>TAG = safe_prefix:HASH<br/>build_scope = safe_prefix-buildimg<br/>pull_cache_key = safe_prefix-pullimg-DIGEST"]
     Key --> Local{"local: docker image<br/>inspect TAG?"}
     Local -- hit --> Finalize
     Local -- miss --> Route{dockerfile set?}
@@ -56,8 +56,7 @@ The reusable workflow `.github/workflows/ensure-docker-image.yml` is a thin wrap
 | `context` | no | `.` | Build context directory. Only used in build mode. |
 | `build_args` | no | `""` | Newline-separated `KEY=VALUE`, forwarded to `--build-arg`. |
 | `base_image` | **yes** | — | Image reference. Pulled and tagged locally in pull mode; used for content-hash stability in build mode. The action does not rewrite your Dockerfile's `FROM` — set `base_image` to match what your Dockerfile imports. |
-| `tag` | no | `cached-image` | Local tag base. The action appends `<prefix>-<hash>`. |
-| `tag_prefix` | **yes** | — | Project namespace; dual-purpose (tag partition on self-hosted, Buildx GHA cache scope on hosted). See [Tag prefix guidelines](#tag-prefix-guidelines). |
+| `tag_prefix` | **yes** | — | Project namespace, single string with three roles. **(1) Docker tag (both runner types)**: produced local tag is `<tag_prefix>:<hash>`, the REPOSITORY column in `docker images`. **(2) Buildx GHA cache scope (hosted build)**: `type=gha,scope=<tag_prefix>-buildimg` — partitions layer cache per project. **(3) `actions/cache` key (hosted pull)**: `<tag_prefix>-pullimg-<base-digest>` — partitions the pulled-tarball cache per project. See [Tag prefix guidelines](#tag-prefix-guidelines). |
 
 ## Outputs
 
@@ -69,22 +68,26 @@ The reusable workflow `.github/workflows/ensure-docker-image.yml` is a thin wrap
 
 ## Tag prefix guidelines
 
-**You must supply `tag_prefix`.** There is no default. Picking the wrong value causes either cache collisions (distinct projects eating each other's entries) or cache thrash (same project, different prefix per workflow → no reuse).
+**You must supply `tag_prefix`.** No default. One string, used three places — picking the wrong value causes either cache collisions (distinct projects eating each other's entries) or cache thrash (same project, different prefix per workflow → no reuse).
 
-### Why it's called "tag prefix" and why it also acts as a cache key
+### The three roles, by runner type
 
-A single input plays two roles depending on runner type:
+| Role | Where it appears | Runner type |
+|---|---|---|
+| Docker tag (REPOSITORY) | `<tag_prefix>:<hash>` in `docker images` | both |
+| Buildx GHA cache scope | `type=gha,scope=<tag_prefix>-buildimg` | GitHub-hosted, build path |
+| `actions/cache` key prefix | `<tag_prefix>-pullimg-<base-digest>` | GitHub-hosted, pull path |
 
-- **Self-hosted** → it's a **tag partition**. It appears in the local docker tag as `<tag>:<tag_prefix>-<hash>` so multiple projects sharing one daemon don't collide on the same tag name. There is no external cache; layer reuse happens via the daemon's local cache, which is content-addressable and does not need the prefix.
-- **GitHub-hosted (build path)** → it's the **Buildx GHA cache scope** (`type=gha,scope=<tag_prefix>-buildimg`). Different projects → different scopes → no cross-project poisoning. Same project, Dockerfile evolves → same scope → buildx still reuses per-layer hashes, so edits don't invalidate everything.
-- **GitHub-hosted (pull path)** → it's the **`actions/cache` key** for the pulled tarball (`<tag_prefix>-pullimg-<base-digest>`), partitioning the cache per project (cache quotas are per-repo anyway).
+On self-hosted runners only the first role applies (no external cache; the daemon's local layer cache is content-addressable and project-agnostic). The prefix still earns its keep there because **one daemon is shared across every repo that runs on that machine** — distinct prefixes keep `docker images` clean per project.
 
-The name leans into the self-hosted framing because that's the one people intuit first; the hosted-runner cache-scope role is the natural additional duty of the same identifier.
+On GitHub-hosted runners, GitHub already isolates the Actions cache per repo at the platform level, so cross-repo poisoning isn't a risk. Within a single repo, the prefix differentiates *purposes* (e.g. one repo building both an agent image and a check image) so each gets its own cache scope.
 
-Rules of thumb:
-- **Namespace by repo**: `${{ github.repository }}-<purpose>`, e.g. `octocat/my-app-ci-img`.
-- **Do not include volatile fields** like `github.sha`, `github.run_id`, or the date. The action already hashes Dockerfile content, build args, and base image digest into the tag — the prefix should stay **stable** across runs that should share a cache.
-- **Distinguish purposes** if one repo builds multiple images: `${{ github.repository }}-test-img` vs `${{ github.repository }}-agent-img`.
+### Rules of thumb
+
+- **Pick something short and project-specific.** `agent-img`, `check-img`, `<purpose>-img`. Short prefixes keep `docker images` readable.
+- **Distinguish purposes if one repo builds multiple images:** `agent-img` vs `check-img`.
+- **Including `${{ github.repository }}`** (e.g. `${{ github.repository }}-agent-img`) is a defensive convention — useful when the workflow file is copy-pasted across many repos and you want each instance to self-namespace without manual editing. A hand-picked unique name is functionally equivalent.
+- **Do not include volatile fields** like `github.sha`, `github.run_id`, or the date. The action already hashes Dockerfile content, build args, and base image digest into the tag — the prefix must stay **stable** across runs that should share a cache.
 - **Organization-wide images** shared across several repos can use a shared prefix, but only if you trust every workflow writing to it not to poison the cache.
 
 ## Usage

@@ -23,7 +23,7 @@ on:
         required: true
         type: string
       extra_docker_args:
-        description: Extra args spliced into `docker run` for the agent + constraint containers (forwarded as CLAUDE_EXTRA_DOCKER_ARGS).
+        description: Extra args spliced into `docker run` for the agent + constraint containers (forwarded as EXTRA_DOCKER_ARGS).
         required: false
         type: string
         default: ""
@@ -184,7 +184,7 @@ jobs:
         run: |
           # DOCKER_FILES must be set in the self-hosted runner's service env
           # (e.g. actions-runner/.env). It points at the host dir holding
-          # persistent Claude credentials/cargo caches mounted into the agent.
+          # persistent credentials/cargo caches mounted into the docker container.
           : "${DOCKER_FILES:?DOCKER_FILES not set in runner env — configure it in the runner service env (actions-runner/.env)}"
           mkdir -p "$DOCKER_FILES/.credentials" "$DOCKER_FILES/.cargo" "$DOCKER_FILES/.local"
           [ -s "$DOCKER_FILES/.claude.local.json" ] || printf '{}\n' > "$DOCKER_FILES/.claude.local.json"
@@ -194,29 +194,22 @@ jobs:
       # base image is private, they must configure a docker login step in
       # their own caller workflow before ensure-docker-image runs.
 
-      - name: Run Claude agent in Docker
+      - name: Run agent in Docker
         id: agent
-        env:
-          MODEL:        ${{ needs.parse-issue.outputs.model }}
-          TIMEOUT_SECS: ${{ needs.parse-issue.outputs.timeout_secs }}
-          PROMPT:       ${{ needs.parse-issue.outputs.agent_task_text }}
-          AGENT_IMAGE:  ${{ inputs.docker_image }}
-          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
-        run: |
-          echo "::group::Claude Agent Output"
-          set +e
-          bash .github/scripts/run-in-docker-claude.sh
-          EXIT_CODE=$?
-          echo "::endgroup::"
-          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-          exit "$EXIT_CODE"
+        uses: Clockwork-Pilot/autopilot/.github/actions/run-agent@main
+        with:
+          model:             ${{ needs.parse-issue.outputs.model }}
+          prompt:            ${{ needs.parse-issue.outputs.agent_task_text }}
+          agent_image:       ${{ inputs.docker_image }}
+          timeout_secs:      ${{ needs.parse-issue.outputs.timeout_secs }}
+          extra_docker_args: ${{ inputs.extra_docker_args }}
 
       - name: Run constraint checks
         id: constraints
         if: always()
         env:
           AGENT_IMAGE: ${{ inputs.docker_image }}
-          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
+          EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: |
           # stdout → issue comment; exit code gates the commit step and
           # propagates to the job result (red on constraint failure).
@@ -224,7 +217,7 @@ jobs:
           # Re-display the constraint report the in-container agent already
           # produced (spec-checks.k.json on disk). --dry-run loads that file
           # and prints the report without re-running any constraint `cmd`.
-          bash .github/scripts/run-in-docker-no-claude.sh \
+          bash .github/scripts/run-in-docker-no-agent.sh \
             '$PLUGIN_ROOT/bin/check --dry-run --full-report' \
             > /tmp/constraints.md 2>&1
           EXIT_CODE=$?
@@ -253,7 +246,7 @@ jobs:
           MODEL:       ${{ needs.parse-issue.outputs.model }}
           PROMPT:      commit changes
           AGENT_IMAGE: ${{ inputs.docker_image }}
-          CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
+          EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
         run: bash .github/scripts/run-in-docker-claude.sh --allow-git-commit || true
 
       - name: Detect new commit

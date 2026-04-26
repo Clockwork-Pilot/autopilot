@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Run an arbitrary bash command inside the agent docker image with only the
-# workspace mounted. No claude credentials, caches, or claude-specific env —
-# for callers that just need the toolchain image (e.g. constraint checks).
+# workspace mounted. Just enough for constraint checks.
 #
 # Env:
 #   AGENT_IMAGE              — required. Autopilot-ws-compatible image ref to run in.
 #   GITHUB_WORKSPACE         — defaults to $PWD so the script is usable outside CI.
-#   CLAUDE_EXTRA_DOCKER_ARGS — optional extra args spliced into `docker run`.
-# Usage: run-in-docker-no-claude.sh <bash command string>
+#   EXTRA_DOCKER_ARGS — optional extra args spliced into `docker run`.
+# Usage: run-in-docker-no-agent.sh <bash command string>
 set -uo pipefail
 
 : "${GITHUB_WORKSPACE:=$PWD}"
@@ -25,11 +24,11 @@ if command -v docker >/dev/null 2>&1; then
     -e "HOST_UID=$(id -u)" \
     -e "HOST_GID=$(id -g)" \
     -v "$GITHUB_WORKSPACE:/workspace" \
-    ${CLAUDE_EXTRA_DOCKER_ARGS:-} \
+    ${EXTRA_DOCKER_ARGS:-} \
     "$AGENT_IMAGE" \
     bash -c "source /docker-scripts/user-entrypoint.sh; $CMD"
 else
   # No docker available (local dev / minimal sandbox): run the command
   # directly against the host shell. Tooling must be in PATH.
-  CLAUDE_PROJECT_ROOT="$GITHUB_WORKSPACE" bash -c "$CMD"
+  PROJECT_ROOT="$GITHUB_WORKSPACE" bash -c "$CMD"
 fi

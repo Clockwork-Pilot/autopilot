@@ -38,25 +38,24 @@ inputs:
       the Dockerfile still decides the base; this input is what drives the pull+tag
       path and the cache-key stability.
     required: true
-  tag:
-    description: Local tag base. A `<tag_prefix>-<hash>` suffix is appended, producing `<tag>:<tag_prefix>-<hash>`.
-    required: false
-    default: cached-image
   tag_prefix:
     description: |
-      REQUIRED. Project namespace. Dual-purpose:
-        - Tag partition (both runner types): appears in the local docker
-          tag as `<tag>:<tag_prefix>-<hash>`, preventing tag collisions
-          when multiple projects share one docker daemon. This is the
-          natural "tag" role on self-hosted runners.
-        - Buildx GHA cache scope (GitHub-hosted build path only): isolates
-          one project's layer cache from another's while staying stable
-          across edits to that project's Dockerfile, so layer reuse still
-          works as the Dockerfile evolves. This is the natural "cache key
-          prefix" role on hosted runners.
-      Use a project-specific value (e.g. `<org>/<repo>-img`, typically
-      derived from github.repository at the call site). Distinct projects
-      MUST use distinct prefixes. No default: omitting this is a usage error.
+      REQUIRED. Project namespace. Dual-purpose, single string:
+        - Docker tag (both runner types): the produced local tag is
+          `<tag_prefix>:<hash>`, so this is what `docker images` shows in
+          the REPOSITORY column. Multiple projects sharing one daemon
+          (typical on a per-user self-hosted runner) keep their tags
+          partitioned because each project picks a distinct prefix.
+        - Buildx GHA cache scope (GitHub-hosted build path only): scopes
+          the layer cache (`type=gha,scope=<tag_prefix>-buildimg`) and the
+          actions/cache pull-tarball key (`<tag_prefix>-pullimg-<digest>`)
+          per project, so distinct projects don't poison each other's cache
+          and a single project's edits still hit per-layer reuse.
+      Pick something short and project-specific (e.g. `agent-img`,
+      `check-img`). Distinct projects MUST use distinct prefixes. Including
+      `${{ github.repository }}` is a defensive convention for templates
+      copy-pasted across many repos, but a hand-picked unique name is
+      equivalent. No default: omitting this is a usage error.
     required: true
 
 outputs:
@@ -101,7 +100,6 @@ runs:
         BUILD_ARGS:  ${{ inputs.build_args }}
         BASE_DIGEST: ${{ steps.base.outputs.digest }}
         PREFIX:      ${{ inputs.tag_prefix }}
-        TAG_BASE:    ${{ inputs.tag }}
       run: |
         set -euo pipefail
         if [ -z "$PREFIX" ]; then
@@ -117,7 +115,7 @@ runs:
           HASH="${DF_HASH}-${BASE_DIGEST}-${ARG_HASH}"
         fi
         echo "hash=$HASH"                               >> "$GITHUB_OUTPUT"
-        echo "tag=${TAG_BASE}:${SAFE_PREFIX}-${HASH}"   >> "$GITHUB_OUTPUT"
+        echo "tag=${SAFE_PREFIX}:${HASH}"               >> "$GITHUB_OUTPUT"
         echo "build_scope=${SAFE_PREFIX}-buildimg"      >> "$GITHUB_OUTPUT"
         echo "pull_cache_key=${SAFE_PREFIX}-pullimg-${BASE_DIGEST}" >> "$GITHUB_OUTPUT"
 

@@ -1,0 +1,32 @@
+name: run-agent
+description: Run a coding agent inside the autopilot-ws docker image and emit its exit code as a step output.
+
+inputs:
+  model:             { required: true,  description: "Model name override." }
+  prompt:            { required: true,  description: "Prompt fed to agent." }
+  agent_image:       { required: true,  description: "Local docker tag prepared by ensure-docker-image." }
+  timeout_secs:      { required: false, default: "180", description: "Hard timeout for the docker run." }
+  extra_docker_args: { required: false, default: "",    description: "Extra args spliced into docker run (forwarded as EXTRA_DOCKER_ARGS)." }
+
+outputs:
+  exit_code: { description: "Agent process exit code.", value: "${{ steps.a.outputs.exit_code }}" }
+
+runs:
+  using: composite
+  steps:
+    - id: a
+      shell: bash
+      env:
+        MODEL:                    ${{ inputs.model }}
+        PROMPT:                   ${{ inputs.prompt }}
+        AGENT_IMAGE:              ${{ inputs.agent_image }}
+        TIMEOUT_SECS:             ${{ inputs.timeout_secs }}
+        EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
+      run: |
+        echo "::group::Agent Output"
+        set +e
+        bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-claude.sh"
+        EXIT_CODE=$?
+        echo "::endgroup::"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        exit "$EXIT_CODE"

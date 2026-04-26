@@ -10,7 +10,7 @@ inputs:
     required: false
     default: check_spec_constraints.py
   extra_docker_args:
-    description: Extra args spliced into `docker run` (forwarded as CLAUDE_EXTRA_DOCKER_ARGS).
+    description: Extra args spliced into `docker run` (forwarded as EXTRA_DOCKER_ARGS).
     required: false
     default: ""
 
@@ -22,5 +22,5 @@ runs:
       env:
         AGENT_IMAGE: ${{ inputs.image }}
         CMD: ${{ inputs.command }}
-        CLAUDE_EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
-      run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-claude.sh" "$CMD"
+        EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
+      run: bash "$GITHUB_ACTION_PATH/../../scripts/run-in-docker-no-agent.sh" "$CMD"

@@ -14,13 +14,11 @@ Workflow structure constraints for .github/workflows
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
-      - [choose_branch_has_negative_fixture](#choose_branch_has_negative_fixture)
       - [choose_branch_test_uses_composite_action](#choose_branch_test_uses_composite_action)
       - [choose_branch_via_action](#choose_branch_via_action)
       - [composite_actions_yaml_loadable](#composite_actions_yaml_loadable)
       - [every_action_with_fixtures_has_negative_fixture](#every_action_with_fixtures_has_negative_fixture)
       - [no_legacy_centralized_fixtures](#no_legacy_centralized_fixtures)
-      - [parse_issue_has_negative_fixture](#parse_issue_has_negative_fixture)
       - [parse_issue_test_uses_composite_action](#parse_issue_test_uses_composite_action)
       - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
@@ -33,6 +31,7 @@ Workflow structure constraints for .github/workflows
       - [actionlint_passes](#actionlint_passes)
       - [build_push_action_pinned_via_env](#build_push_action_pinned_via_env)
       - [checkout_pinned_via_env](#checkout_pinned_via_env)
+      - [ensure_docker_image_uses_tag_prefix_not_tag](#ensure_docker_image_uses_tag_prefix_not_tag)
       - [no_checkout_v4_in_workflows](#no_checkout_v4_in_workflows)
       - [no_hardcoded_base_image](#no_hardcoded_base_image)
       - [setup_buildx_action_pinned_via_env](#setup_buildx_action_pinned_via_env)
@@ -66,9 +65,6 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - One behavioral constraint per dispatchable step, using mktemp -d for isolation
 
-#### choose_branch_has_negative_fixture
-**Description:** Meta: choose-branch/fixtures/ must contain at least one case dir named negative-*. Same rationale as parse_issue_has_negative_fixture — keeps the diff-fires proof load-bearing.
-
 #### choose_branch_test_uses_composite_action
 **Description:** Architectural: the choose-branch test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/choose-branch, not by open-coding run: bash .github/actions/choose-branch/script.sh. Same gate as parse_issue_test_uses_composite_action — keeps the harness exercising action.yml metadata.
 
@@ -83,9 +79,6 @@ Workflow structure constraints for .github/workflows
 
 #### no_legacy_centralized_fixtures
 **Description:** Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.
-
-#### parse_issue_has_negative_fixture
-**Description:** Meta: parse-issue/fixtures/ must contain at least one case dir named negative-*. The harness inverts diff polarity for these (matched=FAIL, mismatch=OK), making them a live demonstration that fixture comparison is actually evaluated.
 
 #### parse_issue_test_uses_composite_action
 **Description:** Architectural: the parse-issue test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata (broken outputs:, mistyped expressions) fails the suite instead of going undetected.
@@ -129,6 +122,9 @@ Workflow structure constraints for .github/workflows
 
 #### checkout_pinned_via_env
 **Description:** Security: every actions/checkout reference in workflows must match $CHECKOUT_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved checkout pin; update there to rotate.
+
+#### ensure_docker_image_uses_tag_prefix_not_tag
+**Description:** ensure-docker-image.yml workflow_call.inputs must include tag_prefix and must not include tag.
 
 #### no_checkout_v4_in_workflows
 **Description:** Negative: no .github/workflows/*.yml file may reference actions/checkout@v4

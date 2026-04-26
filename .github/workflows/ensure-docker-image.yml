@@ -35,11 +35,6 @@ on:
         description: REQUIRED. See .github/actions/ensure-docker-image/README.md.
         required: true
         type: string
-      tag:
-        description: Local tag base (a content hash is appended).
-        required: false
-        type: string
-        default: cached-image
     outputs:
       docker_image:
         description: Fully qualified local tag of the produced image. Pass to coding-agent.yml or another consumer.
@@ -60,5 +55,4 @@ jobs:
           base_image:       ${{ inputs.base_image }}
           dockerfile:       ${{ inputs.dockerfile }}
           build_args:       ${{ inputs.build_args }}
-          tag:              ${{ inputs.tag }}
           tag_prefix:       ${{ inputs.tag_prefix }}

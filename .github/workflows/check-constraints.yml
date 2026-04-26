@@ -65,7 +65,6 @@ jobs:
           dockerfile:       ${{ inputs.dockerfile }}
           build_args:       ${{ inputs.build_args }}
           base_image:       ${{ inputs.base_image }}
-          tag:              autopilot-check
           tag_prefix:       ${{ inputs.tag_prefix }}
 
       - uses: Clockwork-Pilot/autopilot/.github/actions/check-constraints@main
