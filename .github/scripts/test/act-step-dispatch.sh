@@ -39,9 +39,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-WF=".github/workflows/$WORKFLOW"
-if [ ! -f "$WF" ]; then
-  echo "Error: Workflow not found: $WF" >&2
+# Search the consumer-facing workflows dir first, then the local-only test
+# workflows dir (act-step-runner.yml lives there to keep it out of GitHub's
+# reusable-workflow surface — see no_scripts_path_in_reusable_workflows).
+WF=""
+for d in .github/workflows .github/scripts/test/workflows; do
+  if [ -f "$d/$WORKFLOW" ]; then
+    WF="$d/$WORKFLOW"
+    break
+  fi
+done
+if [ -z "$WF" ]; then
+  echo "Error: Workflow not found: $WORKFLOW (searched .github/workflows, .github/scripts/test/workflows)" >&2
   exit 1
 fi
 

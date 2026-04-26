@@ -238,12 +238,13 @@ jobs:
       - name: Agent commit
         id: agent-commit
         if: always() && steps.agent.outputs.exit_code == '0' && steps.constraints.outputs.exit_code == '0'
-        env:
-          MODEL:       ${{ needs.parse-issue.outputs.model }}
-          PROMPT:      commit changes
-          AGENT_IMAGE: ${{ inputs.docker_image }}
-          EXTRA_DOCKER_ARGS: ${{ inputs.extra_docker_args }}
-        run: bash .github/scripts/run-in-docker-claude.sh --allow-git-commit || true
+        uses: Clockwork-Pilot/autopilot/.github/actions/run-agent@main
+        with:
+          model:             ${{ needs.parse-issue.outputs.model }}
+          prompt:            commit changes
+          agent_image:       ${{ inputs.docker_image }}
+          extra_docker_args: ${{ inputs.extra_docker_args }}
+          allow_git_commit:  "true"
 
       - name: Detect new commit
         id: detect-new-commit

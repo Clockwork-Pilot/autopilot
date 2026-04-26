@@ -55,6 +55,24 @@
           "cmd": "F=$PROJECT_ROOT/.github/workflows/ensure-docker-image.yml; T=$(yq -r '.on.workflow_call.inputs | has(\"tag\")' \"$F\"); P=$(yq -r '.on.workflow_call.inputs | has(\"tag_prefix\")' \"$F\"); [ \"$T\" = false ] && [ \"$P\" = true ]",
           "description": "ensure-docker-image.yml workflow_call.inputs must include tag_prefix and must not include tag.",
           "fails_count": 1
+        },
+        "act_step_runner_relocated_out_of_workflows_dir": {
+          "id": "act_step_runner_relocated_out_of_workflows_dir",
+          "cmd": "[ ! -e \"$PROJECT_ROOT/.github/workflows/act-step-runner.yml\" ] && [ -f \"$PROJECT_ROOT/.github/scripts/test/workflows/act-step-runner.yml\" ]",
+          "description": "Architectural: act-step-runner.yml is a local act test harness, never triggered by GitHub. It must live under .github/scripts/test/workflows/ (not .github/workflows/) so GitHub does not register it as a real reusable workflow exposed to consumers, and so it is exempt from no_scripts_path_in_reusable_workflows (the dispatcher script lives next to it).",
+          "fails_count": 1
+        },
+        "actionlint_config_in_test_workflows_dir": {
+          "id": "actionlint_config_in_test_workflows_dir",
+          "cmd": "[ ! -e \"$PROJECT_ROOT/.github/actionlint.yaml\" ] && [ -f \"$PROJECT_ROOT/.github/scripts/test/workflows/actionlint.yaml\" ]",
+          "description": "Architectural: actionlint.yaml must live next to the relocated act-step-runner.yml at .github/scripts/test/workflows/, not at .github/. Its only ignore-rules block targets the test harness file, so the config belongs with the file it scopes \u2014 and keeping it out of .github/ avoids implying that the project ships an actionlint config for consumer-facing workflows.",
+          "fails_count": 1
+        },
+        "no_scripts_path_in_workflow_run_steps": {
+          "id": "no_scripts_path_in_workflow_run_steps",
+          "cmd": "! grep -nE '^\\s*run:.*\\.github/scripts/' \"$PROJECT_ROOT\"/.github/workflows/*.yml",
+          "description": "Negative: no `run:` step in any .github/workflows/*.yml may shell out to a `.github/scripts/...` path. The rule is not reusable-vs-not \u2014 it is about whose checkout sits at $GITHUB_WORKSPACE when `run:` executes. When a consumer invokes one of these workflows, actions/checkout pulls the consumer's repo into $GITHUB_WORKSPACE, so a relative `.github/scripts/foo.sh` resolves against the consumer's tree and fails with 'No such file or directory'. Scripts that need autopilot's own checkout must be invoked from composite actions under .github/actions/, where $GITHUB_ACTION_PATH points at the autopilot tree (e.g. `bash \"$GITHUB_ACTION_PATH/../../scripts/foo.sh\"`); composite actions are exempt and the regex does not match $GITHUB_ACTION_PATH usage. Past incident: coding-agent.yml's Agent commit step ran `bash .github/scripts/run-in-docker-claude.sh` and broke every consumer run.",
+          "fails_count": 1
         }
       }
     },
@@ -134,28 +152,28 @@
           "description": "Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.",
           "fails_count": 1
         },
-        "parse_issue_test_uses_composite_action": {
-          "id": "parse_issue_test_uses_composite_action",
-          "cmd": "F=$PROJECT_ROOT/.github/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"parse-issue\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/parse-issue' || { echo \"act-step-runner.yml job parse-issue must invoke the composite action via uses: ./.github/actions/parse-issue (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
-          "description": "Architectural: the parse-issue test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata (broken outputs:, mistyped expressions) fails the suite instead of going undetected.",
-          "fails_count": 1
-        },
         "composite_actions_yaml_loadable": {
           "id": "composite_actions_yaml_loadable",
           "cmd": "for f in $PROJECT_ROOT/.github/actions/*/action.yml; do python3 -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1]))\" \"$f\" || { echo \"Invalid YAML: $f\"; exit 1; }; done",
           "description": "Static: every .github/actions/*/action.yml must parse as valid YAML. Catches malformed flow-mapping descriptions, unclosed quotes, and similar metadata breaks that the behavioral fixture harness would miss when it bypasses action.yml.",
           "fails_count": 1
         },
-        "choose_branch_test_uses_composite_action": {
-          "id": "choose_branch_test_uses_composite_action",
-          "cmd": "F=$PROJECT_ROOT/.github/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"choose-branch\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/choose-branch' || { echo \"act-step-runner.yml job choose-branch must invoke the composite action via uses: ./.github/actions/choose-branch (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
-          "description": "Architectural: the choose-branch test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/choose-branch, not by open-coding run: bash .github/actions/choose-branch/script.sh. Same gate as parse_issue_test_uses_composite_action \u2014 keeps the harness exercising action.yml metadata.",
-          "fails_count": 1
-        },
         "every_action_with_fixtures_has_negative_fixture": {
           "id": "every_action_with_fixtures_has_negative_fixture",
           "cmd": "MISSING=\"\"; for d in $PROJECT_ROOT/.github/actions/*/fixtures/; do [ -d \"$d\" ] || continue; ls -d \"$d\"negative-*/ >/dev/null 2>&1 || MISSING=\"$MISSING $(dirname $d | xargs basename)\"; done; [ -z \"$MISSING\" ] || { echo \"actions missing negative-*/ fixture:$MISSING. Each action with a fixtures/ dir must include at least one negative-* case so the harness diff is provably load-bearing.\"; exit 1; }",
           "description": "Meta: every .github/actions/<name>/fixtures/ tree must contain at least one negative-*/ case. Generalizes parse_issue_has_negative_fixture and choose_branch_has_negative_fixture: any action with positive fixtures must also carry a live demonstration that the harness diff fires on mismatch. Future actions added with fixtures will be covered automatically.",
+          "fails_count": 1
+        },
+        "act_step_runner_parse_issue_job_uses_composite_action": {
+          "id": "act_step_runner_parse_issue_job_uses_composite_action",
+          "cmd": "F=$PROJECT_ROOT/.github/scripts/test/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"parse-issue\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/parse-issue' || { echo \"act-step-runner.yml job parse-issue must invoke the composite action via uses: ./.github/actions/parse-issue (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
+          "description": "Architectural: the parse-issue test job in act-step-runner.yml (relocated to .github/scripts/test/workflows/) must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata fails the suite. Strict equivalent of the legacy parse_issue_test_uses_composite_action constraint, updated for the new file location.",
+          "fails_count": 1
+        },
+        "act_step_runner_choose_branch_job_uses_composite_action": {
+          "id": "act_step_runner_choose_branch_job_uses_composite_action",
+          "cmd": "F=$PROJECT_ROOT/.github/scripts/test/workflows/act-step-runner.yml; USES=$(yq -r '.jobs[\"choose-branch\"].steps[] | select(.uses != null) | .uses' \"$F\"); echo \"$USES\" | grep -qx './.github/actions/choose-branch' || { echo \"act-step-runner.yml job choose-branch must invoke the composite action via uses: ./.github/actions/choose-branch (got: $USES). Bypassing action.yml hides metadata bugs.\"; exit 1; }",
+          "description": "Architectural: the choose-branch test job in act-step-runner.yml (relocated to .github/scripts/test/workflows/) must invoke the composite action via uses: ./.github/actions/choose-branch. Same gate as act_step_runner_parse_issue_job_uses_composite_action \u2014 keeps the harness exercising action.yml metadata. Strict equivalent of the legacy choose_branch_test_uses_composite_action constraint, updated for the new file location.",
           "fails_count": 1
         }
       }

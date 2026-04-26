@@ -14,12 +14,12 @@ Workflow structure constraints for .github/workflows
     - [Feature: docker_environment](#feature-docker_environment)
       - [docker_required](#docker_required)
     - [Feature: step_output_checks](#feature-step_output_checks)
-      - [choose_branch_test_uses_composite_action](#choose_branch_test_uses_composite_action)
+      - [act_step_runner_choose_branch_job_uses_composite_action](#act_step_runner_choose_branch_job_uses_composite_action)
+      - [act_step_runner_parse_issue_job_uses_composite_action](#act_step_runner_parse_issue_job_uses_composite_action)
       - [choose_branch_via_action](#choose_branch_via_action)
       - [composite_actions_yaml_loadable](#composite_actions_yaml_loadable)
       - [every_action_with_fixtures_has_negative_fixture](#every_action_with_fixtures_has_negative_fixture)
       - [no_legacy_centralized_fixtures](#no_legacy_centralized_fixtures)
-      - [parse_issue_test_uses_composite_action](#parse_issue_test_uses_composite_action)
       - [parse_issue_via_action](#parse_issue_via_action)
     - [Feature: upstream_pr_isolation](#feature-upstream_pr_isolation)
       - [open_upstream_pr_job_shape](#open_upstream_pr_job_shape)
@@ -28,12 +28,15 @@ Workflow structure constraints for .github/workflows
       - [upstream_environment_scoped_to_one_job](#upstream_environment_scoped_to_one_job)
       - [upstream_pr_token_scoped_to_one_job](#upstream_pr_token_scoped_to_one_job)
     - [Feature: workflow_hygiene](#feature-workflow_hygiene)
+      - [act_step_runner_relocated_out_of_workflows_dir](#act_step_runner_relocated_out_of_workflows_dir)
+      - [actionlint_config_in_test_workflows_dir](#actionlint_config_in_test_workflows_dir)
       - [actionlint_passes](#actionlint_passes)
       - [build_push_action_pinned_via_env](#build_push_action_pinned_via_env)
       - [checkout_pinned_via_env](#checkout_pinned_via_env)
       - [ensure_docker_image_uses_tag_prefix_not_tag](#ensure_docker_image_uses_tag_prefix_not_tag)
       - [no_checkout_v4_in_workflows](#no_checkout_v4_in_workflows)
       - [no_hardcoded_base_image](#no_hardcoded_base_image)
+      - [no_scripts_path_in_workflow_run_steps](#no_scripts_path_in_workflow_run_steps)
       - [setup_buildx_action_pinned_via_env](#setup_buildx_action_pinned_via_env)
 
 ## Features
@@ -65,8 +68,11 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - One behavioral constraint per dispatchable step, using mktemp -d for isolation
 
-#### choose_branch_test_uses_composite_action
-**Description:** Architectural: the choose-branch test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/choose-branch, not by open-coding run: bash .github/actions/choose-branch/script.sh. Same gate as parse_issue_test_uses_composite_action — keeps the harness exercising action.yml metadata.
+#### act_step_runner_choose_branch_job_uses_composite_action
+**Description:** Architectural: the choose-branch test job in act-step-runner.yml (relocated to .github/scripts/test/workflows/) must invoke the composite action via uses: ./.github/actions/choose-branch. Same gate as act_step_runner_parse_issue_job_uses_composite_action — keeps the harness exercising action.yml metadata. Strict equivalent of the legacy choose_branch_test_uses_composite_action constraint, updated for the new file location.
+
+#### act_step_runner_parse_issue_job_uses_composite_action
+**Description:** Architectural: the parse-issue test job in act-step-runner.yml (relocated to .github/scripts/test/workflows/) must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata fails the suite. Strict equivalent of the legacy parse_issue_test_uses_composite_action constraint, updated for the new file location.
 
 #### choose_branch_via_action
 **Description:** Behavioral: choose-branch fixtures pass against the act-step-runner.yml wrapper. Replaces choose_branch_cases.
@@ -79,9 +85,6 @@ Workflow structure constraints for .github/workflows
 
 #### no_legacy_centralized_fixtures
 **Description:** Negative: the legacy .github/scripts/test/fixtures/ tree must not exist. Fixtures live under .github/actions/<step>/fixtures/; this guards against partial reverts that would split fixtures across two locations.
-
-#### parse_issue_test_uses_composite_action
-**Description:** Architectural: the parse-issue test job in act-step-runner.yml must invoke the composite action via uses: ./.github/actions/parse-issue, not by open-coding run: bash .github/actions/parse-issue/script.sh. Forces every test run to load action.yml so malformed metadata (broken outputs:, mistyped expressions) fails the suite instead of going undetected.
 
 #### parse_issue_via_action
 **Description:** Behavioral: parse-issue fixtures pass against the act-step-runner.yml wrapper which invokes .github/actions/parse-issue/script.sh. Replaces parse_issue_cases after refactor to composite action.
@@ -114,6 +117,12 @@ Workflow structure constraints for .github/workflows
 **Goals:**
 - All action references must be pinned to full commit SHAs for reproducibility and security
 
+#### act_step_runner_relocated_out_of_workflows_dir
+**Description:** Architectural: act-step-runner.yml is a local act test harness, never triggered by GitHub. It must live under .github/scripts/test/workflows/ (not .github/workflows/) so GitHub does not register it as a real reusable workflow exposed to consumers, and so it is exempt from no_scripts_path_in_reusable_workflows (the dispatcher script lives next to it).
+
+#### actionlint_config_in_test_workflows_dir
+**Description:** Architectural: actionlint.yaml must live next to the relocated act-step-runner.yml at .github/scripts/test/workflows/, not at .github/. Its only ignore-rules block targets the test harness file, so the config belongs with the file it scopes — and keeping it out of .github/ avoids implying that the project ships an actionlint config for consumer-facing workflows.
+
 #### actionlint_passes
 **Description:** Static: actionlint (https://github.com/rhysd/actionlint) must report zero issues across all .github/workflows/*.yml files. Catches typos in ${{ needs.<job> }} references, mismatched composite action inputs, invalid context usage, and other structural issues that yq-only checks miss.
 
@@ -131,6 +140,9 @@ Workflow structure constraints for .github/workflows
 
 #### no_hardcoded_base_image
 **Description:** Architectural: the autopilot-ws image reference must not appear in any workflow yml file — not as a default, not in a comment, not anywhere. The image must be supplied purely via a workflow/action input (base_image) by the consumer caller, so autopilot itself has no built-in coupling to any specific ghcr/registry ref.
+
+#### no_scripts_path_in_workflow_run_steps
+**Description:** Negative: no `run:` step in any .github/workflows/*.yml may shell out to a `.github/scripts/...` path. The rule is not reusable-vs-not — it is about whose checkout sits at $GITHUB_WORKSPACE when `run:` executes. When a consumer invokes one of these workflows, actions/checkout pulls the consumer's repo into $GITHUB_WORKSPACE, so a relative `.github/scripts/foo.sh` resolves against the consumer's tree and fails with 'No such file or directory'. Scripts that need autopilot's own checkout must be invoked from composite actions under .github/actions/, where $GITHUB_ACTION_PATH points at the autopilot tree (e.g. `bash "$GITHUB_ACTION_PATH/../../scripts/foo.sh"`); composite actions are exempt and the regex does not match $GITHUB_ACTION_PATH usage. Past incident: coding-agent.yml's Agent commit step ran `bash .github/scripts/run-in-docker-claude.sh` and broke every consumer run.
 
 #### setup_buildx_action_pinned_via_env
 **Description:** Security: every docker/setup-buildx-action reference across .github/workflows/*.yml and .github/actions/**/*.yml must match $SETUP_BUILDX_ACTION_VER (defined in project.k.json → specs.autopilot.envs). Single source of truth for the approved setup-buildx-action pin; update there to rotate.

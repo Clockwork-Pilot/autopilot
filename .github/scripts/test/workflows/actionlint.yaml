@@ -1,5 +1,5 @@
 paths:
-  .github/workflows/act-step-runner.yml:
+  .github/scripts/test/workflows/act-step-runner.yml:
     # Test harness: `needs.<job>.outputs.*` and extra `inputs.*` references are
     # fixture placeholders interpolated by `act` at dispatch time, not real job
     # dependencies or declared workflow_call inputs. See the comment block at
