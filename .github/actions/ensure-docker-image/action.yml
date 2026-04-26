@@ -106,7 +106,7 @@ runs:
           echo "::error::tag_prefix is required — see action README"
           exit 1
         fi
-        SAFE_PREFIX=$(printf '%s' "$PREFIX" | tr '/ ' '__')
+        SAFE_PREFIX=$(printf '%s' "$PREFIX" | tr '/ ' '__' | tr '[:upper:]' '[:lower:]')
         if [ -z "$DOCKERFILE" ]; then
           HASH="base-${BASE_DIGEST}"
         else
