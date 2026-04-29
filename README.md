@@ -120,6 +120,59 @@ jobs:
 
 **Properties.** Build runs as root (apt/pip/`/usr/local/bin` writes work). Build context is the caller's checkout (`COPY pyproject.toml` etc. works). Caching: GHA layer cache on hosted runners (scoped by `tag_prefix`), local docker cache on self-hosted. Fast-path: if the content-hashed local tag exists, build is skipped. No registry required.
 
+## Workflow API Reference
+
+### `issue-trigger.yml`
+Validates issue trigger and dispatches the caller's `agent.yml`.
+
+**Inputs:**
+- `action` — Event action (`opened` or `labeled`)
+- `label_name` — Applied label name
+- `issue_number` — Issue number
+- `sender_login` — User who triggered (becomes runner_label)
+- `default_branch` — Repository default branch
+- `target_workflow` — Name of caller's workflow to dispatch (e.g., `agent.yml`)
+
+**Secrets:**
+- `RUNNERS_PAT` — Fine-grained PAT with `Administration: Read-only` on this repo
+
+### `ensure-docker-image.yml`
+Builds a custom Docker image layering on `autopilot-ws` base, or pulls base image as-is.
+
+**Inputs:**
+- `runner_label` — Self-hosted runner label (both jobs must share this label)
+- `base_image` — Base image ref (e.g., `ghcr.io/clockwork-pilot/autopilot-ws:latest`)
+- `dockerfile` — Optional path to Dockerfile (relative to checkout root). Omit to use base image without building.
+- `build_args` — Optional newline-separated KEY=VALUE build args
+- `tag_prefix` — Short project namespace for local docker tag (e.g., `agent-img`). Produces tag `<tag_prefix>:<content-hash>`.
+
+**Outputs:**
+- `docker_image` — Fully-qualified local docker tag (e.g., `agent-img:abc123def456`)
+
+### `coding-agent.yml`
+Executes the Claude agent to implement features based on GitHub issue descriptions.
+
+**Inputs:**
+- `runner_label` — Self-hosted runner label (must match `ensure-docker-image.yml`)
+- `issue_number` — GitHub issue number to work on
+- `docker_image` — Pre-built docker image tag (from `ensure-docker-image.yml` output)
+- `extra_docker_args` — Optional extra arguments to pass to `docker run` (e.g., `-e DEBUG=1` for debug logging)
+
+**Secrets:**
+- `UPSTREAM_PR_TOKEN` — PAT for opening PRs on upstream (optional, only if `merge_into_upstream: true`)
+
+**Issue Frontmatter** (optional YAML in issue body):
+```yaml
+---
+timeout: 20                    # Minutes (default 10)
+model: claude-opus-4-6         # Model ID (default claude-haiku-4-5)
+merge_into_upstream: false     # Open PR on upstream instead of fork (default false)
+pr_branch: agent/custom        # Custom branch name (default auto-generated)
+base_branch: develop           # Custom base branch (default repo default)
+---
+<describe feature and constraints>
+```
+
 ## Opening PRs against the upstream repo (optional)
 
 Set `merge_into_upstream: true` in the issue frontmatter to open the PR against the parent repo instead of your fork.
