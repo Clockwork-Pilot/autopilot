@@ -6,7 +6,7 @@
 #
 # Usage: run-in-docker-claude.sh [--allow-git-commit]
 # Required env: MODEL, PROMPT, DOCKER_FILES, GITHUB_WORKSPACE
-# Optional env: TIMEOUT_SECS (0 or unset = no timeout), EXTRA_DOCKER_ARGS
+# Optional env: TIMEOUT_SECS (0 or unset = no timeout), EXTRA_DOCKER_ARGS, DOCKER_RUNTIME
 # Returns container's exit code (or timeout's).
 set -uo pipefail
 
@@ -20,6 +20,9 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-180}"
 PROXY_WRAPPER=(-e PROXY_WRAPPER_CONFIG=/docker-scripts/proxy_wrapper_config.json)
 [ "${1:-}" = "--allow-git-commit" ] && PROXY_WRAPPER=()
 
+RUNTIME_ARGS=()
+[ -n "${DOCKER_RUNTIME:-}" ] && read -ra RUNTIME_ARGS <<< "$DOCKER_RUNTIME"
+
 export CLAUDE_HOOKS_LOG_FILE=/home/node/.claude/hooks.log
 
 # Capture the container id so we can `docker kill` it on cancellation. Without
@@ -30,6 +33,7 @@ CIDFILE=$(mktemp -u)
 trap 'CID=$(cat "$CIDFILE" 2>/dev/null || true); [ -n "$CID" ] && docker kill "$CID" >/dev/null 2>&1 || true; rm -f "$CIDFILE"' EXIT INT TERM
 
 RUN=(timeout --foreground "$TIMEOUT_SECS" docker run --rm --cidfile "$CIDFILE"
+  "${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"}"
   -e AGENT_FILE_ACCESS_RULES=/docker-scripts/y2-plugin-deny-file-rules.json
   -e CLAUDE_HOOKS_LOG_FILE
   "${PROXY_WRAPPER[@]}"

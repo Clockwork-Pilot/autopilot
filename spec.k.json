@@ -1,6 +1,7 @@
 {
   "type": "Spec",
   "model_version": 1,
+  "updated_at": "2026-05-18T19:31:25.330020Z",
   "version": 1,
   "description": "Workflow structure constraints for .github/workflows",
   "contains_unverified_constraints": false,
@@ -94,10 +95,74 @@
           "description": "Negative: act-step-dispatch.sh must exit non-zero AND emit the missing-step error to stderr (not stdout) when the requested step does not exist",
           "fails_count": 1
         },
+        "docker_runtime_forwarded_to_run_agent": {
+          "id": "docker_runtime_forwarded_to_run_agent",
+          "cmd": "F=$PROJECT_ROOT/.github/workflows/coding-agent.yml; yq -e '.on.workflow_call.inputs | has(\"docker_runtime\")' \"$F\" > /dev/null || { echo 'coding-agent.yml missing docker_runtime input'; exit 1; }; [ \"$(yq -r '.on.workflow_call.inputs.docker_runtime.required // false' \"$F\")\" != 'true' ] || { echo 'docker_runtime must be optional'; exit 1; }; A=$PROJECT_ROOT/.github/actions/run-agent/action.yml; yq -e '.inputs | has(\"docker_runtime\")' \"$A\" > /dev/null || { echo 'run-agent/action.yml missing docker_runtime input'; exit 1; }; grep -q 'DOCKER_RUNTIME' \"$A\" || { echo 'run-agent/action.yml missing DOCKER_RUNTIME env'; exit 1; }",
+          "description": "docker_runtime optional input must be wired all the way from coding-agent.yml \u2192 run-agent action \u2192 DOCKER_RUNTIME env var so callers can specify a non-default OCI runtime (e.g. --runtime=runsc for gVisor) without touching extra_docker_args.",
+          "fails_count": 1,
+          "graph": {
+            "type": "MermaidFlowchart",
+            "model_version": 1,
+            "id": "docker_runtime_flow",
+            "label": "docker_runtime propagation chain",
+            "opts": {
+              "direction": "LR",
+              "auto_tree_edges": false
+            },
+            "children": {
+              "caller": {
+                "id": "caller",
+                "label": "agent.yml\n(docker_runtime input)",
+                "shape": "stadium",
+                "links": [
+                  {
+                    "target": "coding_agent",
+                    "label": "docker_runtime:"
+                  }
+                ]
+              },
+              "coding_agent": {
+                "id": "coding_agent",
+                "label": "coding-agent.yml\n(optional input)",
+                "links": [
+                  {
+                    "target": "run_agent_action",
+                    "label": "with: docker_runtime:"
+                  }
+                ]
+              },
+              "run_agent_action": {
+                "id": "run_agent_action",
+                "label": "run-agent/action.yml\n(docker_runtime input)",
+                "links": [
+                  {
+                    "target": "env_var",
+                    "label": "env: DOCKER_RUNTIME"
+                  }
+                ]
+              },
+              "env_var": {
+                "id": "env_var",
+                "label": "DOCKER_RUNTIME env\nin shell step",
+                "links": [
+                  {
+                    "target": "docker_run",
+                    "label": "--runtime=X"
+                  }
+                ]
+              },
+              "docker_run": {
+                "id": "docker_run",
+                "label": "docker run\n${RUNTIME_ARGS[@]}",
+                "shape": "cylinder"
+              }
+            }
+          }
+        },
         "coding_agent_inputs_minimal": {
           "id": "coding_agent_inputs_minimal",
-          "cmd": "F=$PROJECT_ROOT/.github/workflows/coding-agent.yml; KEYS=$(yq -r '.on.workflow_call.inputs | keys | .[]' \"$F\" | sort | tr '\\n' ',' | sed 's/,$//'); EXPECTED=docker_image,extra_docker_args,issue_number,runner_label; [ \"$KEYS\" = \"$EXPECTED\" ] || { echo \"coding-agent.yml workflow_call.inputs = $KEYS (expected $EXPECTED)\"; exit 1; }; [ \"$(yq -r '.on.workflow_call.inputs.docker_image.required' \"$F\")\" = true ] || { echo \"docker_image must be required: true\"; exit 1; }",
-          "description": "Architectural: coding-agent.yml workflow_call.inputs must equal exactly {runner_label, issue_number, docker_image, extra_docker_args}, with docker_image required. Locks in the post-cleanup interface and forbids the legacy internal-prep inputs (base_image, agent_image, dockerfile, build_args, tag_prefix) \u2014 callers must hoist image preparation via ensure-docker-image.yml.",
+          "cmd": "F=$PROJECT_ROOT/.github/workflows/coding-agent.yml; KEYS=$(yq -r '.on.workflow_call.inputs | keys | .[]' \"$F\" | sort | tr '\\n' ',' | sed 's/,$//'); EXPECTED=docker_image,docker_runtime,extra_docker_args,issue_number,runner_label; [ \"$KEYS\" = \"$EXPECTED\" ] || { echo \"coding-agent.yml workflow_call.inputs = $KEYS (expected $EXPECTED)\"; exit 1; }; [ \"$(yq -r '.on.workflow_call.inputs.docker_image.required' \"$F\")\" = true ] || { echo \"docker_image must be required: true\"; exit 1; }",
+          "description": "Architectural: coding-agent.yml workflow_call.inputs must equal exactly {runner_label, issue_number, docker_image, extra_docker_args, docker_runtime}, with docker_image required. docker_runtime is optional (default ''); callers pass it when they need a non-default OCI runtime (e.g. --runtime=runsc for gVisor). Forbids legacy internal-prep inputs (base_image, agent_image, dockerfile, build_args, tag_prefix).",
           "fails_count": 1
         }
       }
@@ -244,5 +309,181 @@
         }
       }
     }
+  },
+  "toc": {
+    "type": "Toc",
+    "model_version": 1,
+    "entries": [
+      {
+        "label": "Overview",
+        "anchor": "overview",
+        "depth": 1
+      },
+      {
+        "label": "Feature: coding_agent_steps",
+        "anchor": "feature-coding_agent_steps",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: coding_agent_inputs_minimal",
+        "anchor": "constraint-coding_agent_inputs_minimal",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: dispatcher_fails_on_missing_step",
+        "anchor": "constraint-dispatcher_fails_on_missing_step",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: docker_runtime_forwarded_to_run_agent",
+        "anchor": "constraint-docker_runtime_forwarded_to_run_agent",
+        "depth": 2
+      },
+      {
+        "label": "Feature: docker_environment",
+        "anchor": "feature-docker_environment",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: docker_required",
+        "anchor": "constraint-docker_required",
+        "depth": 2
+      },
+      {
+        "label": "Feature: runner_cancellation",
+        "anchor": "feature-runner_cancellation",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: docker_run_scripts_kill_container_on_cancel",
+        "anchor": "constraint-docker_run_scripts_kill_container_on_cancel",
+        "depth": 2
+      },
+      {
+        "label": "Feature: step_output_checks",
+        "anchor": "feature-step_output_checks",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: act_step_runner_choose_branch_job_uses_composite_action",
+        "anchor": "constraint-act_step_runner_choose_branch_job_uses_composite_action",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: act_step_runner_parse_issue_job_uses_composite_action",
+        "anchor": "constraint-act_step_runner_parse_issue_job_uses_composite_action",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: choose_branch_via_action",
+        "anchor": "constraint-choose_branch_via_action",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: composite_actions_yaml_loadable",
+        "anchor": "constraint-composite_actions_yaml_loadable",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: every_action_with_fixtures_has_negative_fixture",
+        "anchor": "constraint-every_action_with_fixtures_has_negative_fixture",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: no_legacy_centralized_fixtures",
+        "anchor": "constraint-no_legacy_centralized_fixtures",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: parse_issue_via_action",
+        "anchor": "constraint-parse_issue_via_action",
+        "depth": 2
+      },
+      {
+        "label": "Feature: upstream_pr_isolation",
+        "anchor": "feature-upstream_pr_isolation",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: open_upstream_pr_job_shape",
+        "anchor": "constraint-open_upstream_pr_job_shape",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: run_agent_is_self_hosted",
+        "anchor": "constraint-run_agent_is_self_hosted",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: same_repo_pr_excludes_upstream_mode",
+        "anchor": "constraint-same_repo_pr_excludes_upstream_mode",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: upstream_environment_scoped_to_one_job",
+        "anchor": "constraint-upstream_environment_scoped_to_one_job",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: upstream_pr_token_scoped_to_one_job",
+        "anchor": "constraint-upstream_pr_token_scoped_to_one_job",
+        "depth": 2
+      },
+      {
+        "label": "Feature: workflow_hygiene",
+        "anchor": "feature-workflow_hygiene",
+        "depth": 1
+      },
+      {
+        "label": "Constraint: act_step_runner_relocated_out_of_workflows_dir",
+        "anchor": "constraint-act_step_runner_relocated_out_of_workflows_dir",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: actionlint_config_in_test_workflows_dir",
+        "anchor": "constraint-actionlint_config_in_test_workflows_dir",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: actionlint_passes",
+        "anchor": "constraint-actionlint_passes",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: build_push_action_pinned_via_env",
+        "anchor": "constraint-build_push_action_pinned_via_env",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: checkout_pinned_via_env",
+        "anchor": "constraint-checkout_pinned_via_env",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: ensure_docker_image_uses_tag_prefix_not_tag",
+        "anchor": "constraint-ensure_docker_image_uses_tag_prefix_not_tag",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: no_checkout_v4_in_workflows",
+        "anchor": "constraint-no_checkout_v4_in_workflows",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: no_hardcoded_base_image",
+        "anchor": "constraint-no_hardcoded_base_image",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: no_scripts_path_in_workflow_run_steps",
+        "anchor": "constraint-no_scripts_path_in_workflow_run_steps",
+        "depth": 2
+      },
+      {
+        "label": "Constraint: setup_buildx_action_pinned_via_env",
+        "anchor": "constraint-setup_buildx_action_pinned_via_env",
+        "depth": 2
+      }
+    ]
   }
 }

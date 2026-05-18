@@ -27,6 +27,11 @@ on:
         required: false
         type: string
         default: ""
+      docker_runtime:
+        description: Optional docker --runtime flag value (e.g. --runtime=runsc). Forwarded as DOCKER_RUNTIME to run-agent and check-constraints.
+        required: false
+        type: string
+        default: ""
     secrets:
       UPSTREAM_PR_TOKEN:
         description: PAT used by open-upstream-pr when merge_into_upstream is true. Optional — only issues that opt in require it.
@@ -203,7 +208,7 @@ jobs:
           agent_image:       ${{ inputs.docker_image }}
           timeout_secs:      ${{ needs.parse-issue.outputs.timeout_secs }}
           extra_docker_args: ${{ inputs.extra_docker_args }}
-
+          docker_runtime:    ${{ inputs.docker_runtime }}
       # Re-displays the constraint report the in-container agent already
       # produced (spec-checks.k.json on disk). --dry-run loads that file
       # and prints the report without re-running any constraint `cmd`.
@@ -217,7 +222,6 @@ jobs:
           image:             ${{ inputs.docker_image }}
           command:           $PLUGIN_ROOT/bin/check --dry-run --full-report
           extra_docker_args: ${{ inputs.extra_docker_args }}
-
       - name: Export constraints report as job output
         id: constraints-out
         if: always()
@@ -244,6 +248,7 @@ jobs:
           prompt:            commit changes
           agent_image:       ${{ inputs.docker_image }}
           extra_docker_args: ${{ inputs.extra_docker_args }}
+          docker_runtime:    ${{ inputs.docker_runtime }}
           allow_git_commit:  "true"
 
       - name: Detect new commit
